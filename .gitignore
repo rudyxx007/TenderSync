@@ -1,1 +1,7 @@
 tendersync_modern_architecture.png
+Future_Works.txt
+Possible-Prompt-Lovable.txt
+venv/
+__pycache__/
+.env
+TenderSync_PRD.docx

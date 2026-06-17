@@ -1,0 +1,23 @@
+# PyTorch GPU explicit routing for Windows (CUDA 13.0 for RTX 50-series)
+--extra-index-url https://download.pytorch.org/whl/cu130
+
+# Core Server & API
+fastapi==0.111.0
+uvicorn==0.30.1
+python-multipart==0.0.9
+pydantic==2.7.4
+python-dotenv==1.0.1
+
+# Database & Vector Store
+supabase
+websockets>=14.0
+
+# ML Pipeline & Extractors
+docling==2.1.0
+langchain-text-splitters>=0.3.8
+voyageai==0.4.0
+groq>=0.37.0
+
+# PyTorch Ecosystem (GPU Stable Builds)
+torch==2.12.0+cu130
+torchvision==0.27.0+cu130
