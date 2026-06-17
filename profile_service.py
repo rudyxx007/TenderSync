@@ -1,0 +1,142 @@
+"""Company profile CRUD and completeness validation."""
+
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
+from bid_engine import normalize_company_profile
+from schemas import CompanyProfileInput, CompanyProfileResponse, ProfileStatusResponse
+
+# Minimum fields required before a user can upload tenders or run evaluations.
+REQUIRED_PROFILE_FIELDS: Dict[str, str] = {
+    "company_name": "Company name",
+    "min_contract_value": "Minimum contract value",
+    "active_certifications": "At least one certification",
+    "core_capabilities": "At least one core capability",
+}
+
+
+def _is_non_empty_list(value: Any) -> bool:
+    return isinstance(value, list) and len(value) > 0
+
+
+def compute_missing_fields(profile: Dict[str, Any]) -> List[str]:
+    missing: List[str] = []
+    if not profile.get("company_name") or not str(profile["company_name"]).strip():
+        missing.append("company_name")
+    min_val = profile.get("min_contract_value")
+    if min_val is None or float(min_val) <= 0:
+        missing.append("min_contract_value")
+    if not _is_non_empty_list(profile.get("active_certifications")):
+        missing.append("active_certifications")
+    if not _is_non_empty_list(profile.get("core_capabilities")):
+        missing.append("core_capabilities")
+    return missing
+
+
+def is_profile_complete(profile: Dict[str, Any]) -> bool:
+    return len(compute_missing_fields(profile)) == 0
+
+
+def profile_to_response(raw: Dict[str, Any]) -> CompanyProfileResponse:
+    normalized = normalize_company_profile(raw)
+    missing = compute_missing_fields(normalized)
+    return CompanyProfileResponse(
+        user_id=str(normalized["user_id"]),
+        company_name=normalized.get("company_name") or "",
+        min_contract_value=float(normalized.get("min_contract_value") or 0),
+        max_contract_value=normalized.get("max_contract_value"),
+        active_certifications=normalized.get("active_certifications") or [],
+        core_capabilities=normalized.get("core_capabilities") or [],
+        strategic_focus_areas=normalized.get("strategic_focus_areas") or [],
+        past_performance_sectors=normalized.get("past_performance_sectors") or [],
+        geographic_coverage=normalized.get("geographic_coverage") or [],
+        insurance_coverage=normalized.get("insurance_coverage") or {},
+        min_bid_lead_time_days=normalized.get("min_bid_lead_time_days", 14),
+        team_capacity_score=normalized.get("team_capacity_score", 3),
+        relationship_strength_score=normalized.get("relationship_strength_score", 2),
+        is_complete=len(missing) == 0,
+        missing_fields=missing,
+        created_at=normalized.get("created_at"),
+        updated_at=normalized.get("updated_at"),
+    )
+
+
+def get_profile_status(supabase_client, user_id: str) -> ProfileStatusResponse:
+    response = (
+        supabase_client.table("company_profiles")
+        .select("*")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not response.data:
+        all_missing = list(REQUIRED_PROFILE_FIELDS.keys())
+        return ProfileStatusResponse(
+            exists=False,
+            is_complete=False,
+            missing_fields=all_missing,
+            can_use_app=False,
+            profile=None,
+        )
+
+    profile_resp = profile_to_response(response.data[0])
+    return ProfileStatusResponse(
+        exists=True,
+        is_complete=profile_resp.is_complete,
+        missing_fields=profile_resp.missing_fields,
+        can_use_app=profile_resp.is_complete,
+        profile=profile_resp,
+    )
+
+
+def require_complete_profile(supabase_client, user_id: str) -> Dict[str, Any]:
+    """Return normalized profile or raise ValueError with actionable message."""
+    response = (
+        supabase_client.table("company_profiles")
+        .select("*")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not response.data:
+        raise ValueError(
+            "Company profile not set up. Complete onboarding at /api/profile before using TenderSync."
+        )
+    normalized = normalize_company_profile(response.data[0])
+    missing = compute_missing_fields(normalized)
+    if missing:
+        labels = [REQUIRED_PROFILE_FIELDS[field] for field in missing]
+        raise ValueError(
+            f"Company profile incomplete. Missing: {', '.join(labels)}. "
+            "Update your profile before uploading tenders."
+        )
+    return normalized
+
+
+def upsert_profile(
+    supabase_client,
+    user_id: str,
+    payload: CompanyProfileInput,
+) -> CompanyProfileResponse:
+    now = datetime.now(timezone.utc).isoformat()
+    row = payload.model_dump()
+    row["user_id"] = user_id
+    row["updated_at"] = now
+
+    existing = (
+        supabase_client.table("company_profiles")
+        .select("user_id, created_at")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if existing.data:
+        supabase_client.table("company_profiles").update(row).eq("user_id", user_id).execute()
+    else:
+        row["created_at"] = now
+        supabase_client.table("company_profiles").insert(row).execute()
+
+    saved = (
+        supabase_client.table("company_profiles")
+        .select("*")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return profile_to_response(saved.data[0])
