@@ -1,5 +1,3 @@
-<a id="readme-top"></a>
-
 <div align="center">
 
   [![Stars][stars-shield]][stars-url]
@@ -77,12 +75,12 @@
 
 Every year, companies lose **thousands of hours** and **significant revenue** sifting through 200+ page RFP documents, only to discover they don't qualify or the opportunity isn't worth pursuing.
 
-| Pain Point                                | Impact                                |
-| :---------------------------------------- | :------------------------------------ |
-| 📄 Reading 200+ pages per tender manually | **3–5 business days** per evaluation  |
-| ❌ Missing mandatory compliance criteria  | Wasted bid preparation costs          |
-| 🎲 Gut-feel based Bid/No-Bid decisions    | Low win rates, wasted resources       |
-| 🔄 No institutional memory across bids    | Same mistakes repeated                |
+| Pain Point                                | Impact                                      |
+| :---------------------------------------- | :------------------------------------------ |
+| 📄 Reading 200+ pages per tender manually | **3–5 business days** per evaluation |
+| ❌ Missing mandatory compliance criteria  | Wasted bid preparation costs                |
+| 🎲 Gut-feel based Bid/No-Bid decisions    | Low win rates, wasted resources             |
+| 🔄 No institutional memory across bids    | Same mistakes repeated                      |
 
 **TenderSync eliminates all of this.** Upload a PDF → get an AI-extracted summary → receive a weighted Probability of Win (PWin) score → make an informed BID, CONDITIONAL, or NO-BID decision in minutes.
 
@@ -96,7 +94,7 @@ Every year, companies lose **thousands of hours** and **significant revenue** si
 graph TD
     A["📄 Upload RFP PDF"] --> B["🔍 Docling Extraction"]
     B --> C["✂️ Intelligent Chunking"]
-    C --> D["🧠 Voyage AI Embeddings"]
+    C --> D["🧠 Hugging Face BGE-M3 Embeddings"]
     D --> E["💾 Supabase pgvector"]
     E --> F["🤖 Groq · Llama 3.3<br/>Structured Extraction"]
     F --> G["⚖️ Hybrid Bid/No-Bid Engine"]
@@ -112,24 +110,24 @@ graph TD
 
 ### The 4-Phase Evaluation Pipeline
 
-| Phase | Description                                                                   | Method               |
-| :---: | :---------------------------------------------------------------------------- | :------------------- |
-| **A** | **Hard Gate Checks**: deal killers like value mismatch or missing certs        | Deterministic rules  |
-| **B** | **Numeric/Keyword Scoring**: capability overlap, cert matches, budget fit      | Algorithmic scoring  |
-| **C** | **LLM Subjective Scoring**: competitive landscape, strategic alignment        | Groq Llama 3.3       |
-| **D** | **Weighted PWin Calculation**: 7 dimensions aggregated into a 0–100 score     | Weighted aggregation |
+|    Phase    | Description                                                                      | Method               |
+| :---------: | :------------------------------------------------------------------------------- | :------------------- |
+| **A** | **Hard Gate Checks**: deal killers like value mismatch or missing certs    | Deterministic rules  |
+| **B** | **Numeric/Keyword Scoring**: capability overlap, cert matches, budget fit  | Algorithmic scoring  |
+| **C** | **LLM Subjective Scoring**: competitive landscape, strategic alignment     | Groq Llama 3.3       |
+| **D** | **Weighted PWin Calculation**: 7 dimensions aggregated into a 0–100 score | Weighted aggregation |
 
 ### The 7 Scoring Dimensions
 
-| Dimension             | Weight | What It Measures                                           |
-| :-------------------- | :----: | :--------------------------------------------------------- |
-| Capability Fit        |  20%   | How well core capabilities match the RFP requirements      |
-| Compliance Readiness  |  10%   | Certification and regulatory coverage                      |
-| Commercial Viability  |  15%   | Budget alignment and contract value thresholds             |
-| Past Performance      |  15%   | Relevant sector experience                                 |
-| Competitive Landscape |  10%   | Estimated competition intensity                            |
-| Strategic Alignment   |  15%   | Alignment with company's strategic focus areas             |
-| Delivery Feasibility  |  15%   | Timeline, team capacity, and geographic coverage           |
+| Dimension             | Weight | What It Measures                                      |
+| :-------------------- | :----: | :---------------------------------------------------- |
+| Capability Fit        |  20%  | How well core capabilities match the RFP requirements |
+| Compliance Readiness  |  10%  | Certification and regulatory coverage                 |
+| Commercial Viability  |  15%  | Budget alignment and contract value thresholds        |
+| Past Performance      |  15%  | Relevant sector experience                            |
+| Competitive Landscape |  10%  | Estimated competition intensity                       |
+| Strategic Alignment   |  15%  | Alignment with company's strategic focus areas        |
+| Delivery Feasibility  |  15%  | Timeline, team capacity, and geographic coverage      |
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
@@ -141,7 +139,7 @@ graph TD
   <tr>
     <td width="50%" valign="top">
       <h3>🧠 AI-Powered Extraction</h3>
-      <p>Leverages <b>Groq Llama 3.3</b> and <b>Voyage AI</b> embeddings within a full RAG pipeline to extract tender IDs, issuing authorities, deadlines, budgets, deliverables, and compliance criteria from raw PDF documents.</p>
+      <p>Leverages <b>Groq Llama 3.3</b> and <b>Hugging Face BGE-M3</b> embeddings within a full RAG pipeline to extract tender IDs, issuing authorities, deadlines, budgets, deliverables, and compliance criteria from raw PDF documents.</p>
     </td>
     <td width="50%" valign="top">
       <h3>🚦 Hybrid Bid/No-Bid Engine</h3>
@@ -160,12 +158,22 @@ graph TD
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>🔒 Enterprise Authentication</h3>
-      <p>Supabase JWT authentication with email/password sign-up, cookie-based session management via <code>@supabase/ssr</code>, and Row-Level Security (RLS) for complete data isolation between tenants.</p>
+      <h3>🌍 Market Tenders Discovery</h3>
+      <p>Automated scraping of public portals (e.g., CPPP) to bring relevant market tenders directly into your dashboard. Evaluate public tenders with one click.</p>
     </td>
     <td width="50%" valign="top">
-      <h3>📅 Calendar Export</h3>
-      <p>Automatically parses extracted submission deadlines and generates downloadable <code>.ics</code> calendar files, so you never miss a tender deadline.</p>
+      <h3>⚖️ Side-by-Side Comparison</h3>
+      <p>Compare two analyzed tenders side-by-side using Groq LLM to evaluate budget, deadlines, compliance, and deliverable differences.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🤖 AI Proposal Writer (LangGraph)</h3>
+      <p>A multi-agent orchestrator (Analyst, Researcher, Writer, Reviewer) that automatically generates a complete proposal draft based on the tender analysis and your company capabilities.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>📅 Calendar Export & PDF Reports</h3>
+      <p>Generate downloadable <code>.ics</code> calendar files for deadlines, and export beautiful PDF reports of your tender evaluations using WeasyPrint and Plotly.</p>
     </td>
   </tr>
 </table>
@@ -253,14 +261,14 @@ graph TD
 <br />
 </div>
 
-| Layer             | Technologies                                                                     |
-| :---------------- | :------------------------------------------------------------------------------- |
-| **Frontend**      | Next.js 15 (App Router) · TypeScript · Tailwind CSS · shadcn/ui                 |
-| **Backend**       | FastAPI · Python 3.10+ · Pydantic · Uvicorn                                     |
-| **AI / ML**       | Groq Llama 3.3 (Extraction) · Voyage AI (Embeddings) · Docling (PDF Parsing)    |
-| **Database**      | Supabase PostgreSQL + pgvector + Row-Level Security                              |
-| **Auth**          | Supabase Auth (JWT) · `@supabase/ssr`                                            |
-| **Deployment**    | Vercel (Frontend) · Local GPU Server (Backend)                                   |
+| Layer                | Technologies                                                                             |
+| :------------------- | :--------------------------------------------------------------------------------------- |
+| **Frontend**   | Next.js 15 (App Router) · TypeScript · Tailwind CSS · shadcn/ui                       |
+| **Backend**    | FastAPI · Python 3.10+ · Pydantic · Uvicorn                                           |
+| **AI / ML**    | Groq Llama 3.3 (Extraction) · Hugging Face BGE-M3 (Embeddings) · Docling (PDF Parsing) |
+| **Database**   | Supabase PostgreSQL + pgvector + Row-Level Security                                      |
+| **Auth**       | Supabase Auth (JWT) ·`@supabase/ssr`                                                  |
+| **Deployment** | Vercel (Frontend) · Local GPU Server (Backend)                                          |
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
@@ -286,24 +294,47 @@ graph TD
 ```
 TenderSync/
 │
-├── main.py                 # FastAPI app, all routes, CORS, full RAG pipeline
-├── auth.py                 # Supabase JWT verification + dev bypass mode
-├── bid_engine.py           # 4-phase hybrid Bid/No-Bid engine (451 lines)
-├── profile_service.py      # Company profile CRUD + completeness validation
-├── schemas.py              # Pydantic request/response models
-├── requirements.txt        # Python dependencies
+├── backend/
+│   ├── main.py                 # FastAPI app entry point and router aggregator
+│   ├── db.py                   # Centralized Supabase/Groq clients and user dependency injection
+│   ├── document_extractor.py   # Unified document extraction logic (RapidOCR, PyPDFium2, Docling)
+│   ├── embedding_service.py    # Hugging Face BAAI/bge-m3 1024-dim dense embedding service
+│   ├── pipeline_service.py     # RAG pipeline orchestrator (chunking, embedding, semantic retrieval)
+│   ├── bid_engine.py           # 4-phase hybrid Bid/No-Bid evaluation engine (7 scoring dimensions)
+│   ├── proposal_engine.py      # LangGraph multi-agent proposal generator (Plan, Draft, Review)
+│   ├── comparison_engine.py    # Multi-tender side-by-side comparative analysis (Groq LLM)
+│   ├── tender_discovery.py     # Public tender scrapers (CPPP, GeM) & discovery engine
+│   ├── report_generator.py     # WeasyPrint PDF evaluation report generator with Plotly charts
+│   ├── profile_service.py      # Multi-tenant company profile CRUD & completeness validation
+│   ├── schemas.py              # Pydantic v2 models for requests, responses, and validation
+│   ├── auth.py                 # Supabase JWT authentication, user/org resolution, RBAC
+│   ├── requirements.txt        # Production Python dependencies
+│   ├── routers/                # Domain-driven FastAPI routers
+│   │   ├── auth.py
+│   │   ├── batches.py
+│   │   ├── exports.py
+│   │   ├── market.py
+│   │   ├── orgs.py
+│   │   ├── profiles.py
+│   │   ├── proposals.py
+│   │   └── tenders.py
+│   ├── templates/
+│   │   └── evaluation_report.html # Jinja2 HTML template for downloadable PDF reports
+│   ├── supabase/
+│   │   ├── schema.sql          # PostgreSQL + pgvector schema & RLS policies
+│   │   └── migrations/         # Versioned SQL migrations (001 to 006)
+│   └── tests/                  # 68 automated unit tests (100% pass rate)
 │
 ├── docs/
-│   └── APPLICATION_DESIGN.md    # Full architecture + design specification
+│   └── APPLICATION_DESIGN.md   # Full architecture + design specification
 │
 ├── assets/
 │   ├── tendersync_logo.png      # Project logo
 │   └── architecture_diagram.png # System architecture diagram
 │
-├── .env                    # Environment variables (git-ignored)
 ├── .gitignore
 ├── LICENSE
-└── README.md               # ← You are here
+└── README.md                   # ← You are here
 ```
 
 > [!NOTE]
@@ -317,21 +348,21 @@ TenderSync/
 
 ### Prerequisites
 
-| Requirement           | Version | Purpose                 |
-| :-------------------- | :------ | :---------------------- |
-| **Python**            | 3.10+   | Backend runtime         |
-| **Node.js**           | 18+     | Frontend runtime        |
-| **npm** or **pnpm**   | Latest  | Package management      |
-| **Supabase Account**  | –       | Auth + Database         |
-| **Groq API Key**      | –       | LLM inference           |
-| **Voyage AI API Key** | –       | Embedding generation    |
+| Requirement                     | Version | Purpose                     |
+| :------------------------------ | :------ | :-------------------------- |
+| **Python**                | 3.10+   | Backend runtime             |
+| **Node.js**               | 18+     | Frontend runtime            |
+| **npm** or **pnpm**       | Latest  | Package management          |
+| **Supabase Account**      | –      | Auth, PostgreSQL, pgvector  |
+| **Groq API Key**          | –      | Fast LLM inference          |
+| **Hugging Face Token**    | –      | BGE-M3 Embedding generation |
 
 ### 1. Clone & Backend Setup
 
 ```bash
 # Clone the repository
 git clone https://github.com/rudyxx007/TenderSync.git
-cd TenderSync
+cd TenderSync/backend
 
 # Create and activate a virtual environment
 python -m venv venv
@@ -348,7 +379,7 @@ pip install -r requirements.txt
 
 ### 2. Configure Environment Variables
 
-Create a `.env` file in the project root:
+Create a `.env` file in the `backend/` directory:
 
 ```env
 # Supabase
@@ -356,35 +387,40 @@ SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_SECRET_KEY=your-supabase-service-role-key
 
 # AI Services
-VOYAGE_API_KEY=your-voyage-api-key
+HF_TOKEN=your-huggingface-read-token
 GROQ_API_KEY=your-groq-api-key
+GROQ_MODEL=openai/gpt-oss-120b
 
 # Development Mode (set to false in production)
 ALLOW_DEV_BYPASS=true
 DEVELOPMENT_USER_ID=your-test-user-uuid
 ```
 
-| Variable               | Required | Description                                                   |
-| :--------------------- | :------: | :------------------------------------------------------------ |
-| `SUPABASE_URL`         |    ✅    | Your Supabase project URL                                     |
-| `SUPABASE_SECRET_KEY`  |    ✅    | Service role key (never expose to frontend)                   |
-| `VOYAGE_API_KEY`       |    ✅    | API key from [voyageai.com](https://www.voyageai.com/)        |
-| `GROQ_API_KEY`         |    ✅    | API key from [groq.com](https://groq.com/)                    |
-| `ALLOW_DEV_BYPASS`     |    ❌    | Enables auth bypass for local testing (default: `false`)      |
-| `DEVELOPMENT_USER_ID`  |    ❌    | UUID used when bypass is enabled                              |
+| Variable                | Required | Description                                               |
+| :---------------------- | :------: | :-------------------------------------------------------- |
+| `SUPABASE_URL`        |    ✅    | Your Supabase project URL                                 |
+| `SUPABASE_SECRET_KEY` |    ✅    | Service role key (never expose to frontend)               |
+| `HF_TOKEN`            |    ✅    | Hugging Face API token for BGE-M3 embeddings              |
+| `GROQ_API_KEY`        |    ✅    | API key from [groq.com](https://groq.com/)                |
+| `GROQ_MODEL`          |    ❌    | LLM model identifier (default: `openai/gpt-oss-120b`)     |
+| `ALLOW_DEV_BYPASS`    |    ❌    | Enables auth bypass for local testing (default: `false`)   |
+| `DEVELOPMENT_USER_ID` |    ❌    | UUID used when bypass is enabled                          |
 
 ### 3. Run the Backend
 
 ```bash
+cd backend
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 The API will be live at `http://127.0.0.1:8000` with interactive Swagger docs at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs).
 
-### 4. Frontend Setup
+### 4. Run Unit Tests
 
-> [!NOTE]
-> Frontend setup instructions will be added once the Next.js app is built and integrated into this repository.
+```bash
+cd backend
+python -m pytest tests/
+```
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
@@ -399,12 +435,12 @@ The API will be live at `http://127.0.0.1:8000` with interactive Swagger docs at
 > 🔗 Live App:  https://[COMING_SOON].vercel.app
 > ```
 
-| Layer          | Service                          |     Status     |
-| :------------- | :------------------------------- | :------------: |
-| **Frontend**   | Vercel (Next.js 15)              | 🔜 Coming Soon |
-| **Backend**    | Local GPU Server (FastAPI)       | ✅ Running     |
-| **Database**   | Supabase (PostgreSQL + pgvector) | ✅ Active      |
-| **Auth**       | Supabase Auth (JWT + RLS)        | ✅ Active      |
+| Layer              | Service                          |     Status     |
+| :----------------- | :------------------------------- | :------------: |
+| **Frontend** | Vercel (Next.js 15)              | 🔜 Coming Soon |
+| **Backend**  | Local GPU Server / Render (FastAPI) |   ✅ Running   |
+| **Database** | Supabase (PostgreSQL + pgvector) |   ✅ Active   |
+| **Auth**     | Supabase Auth (JWT + RLS)        |   ✅ Active   |
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
@@ -415,45 +451,100 @@ The API will be live at `http://127.0.0.1:8000` with interactive Swagger docs at
 All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
 
 <details>
-<summary><kbd>&nbsp;🔐 Authentication&nbsp;</kbd></summary>
+<summary><kbd> 🔐 Authentication & User</kbd></summary>
 <br />
 
-| Method | Endpoint  | Description                             |
-| :----: | :-------- | :-------------------------------------- |
-| `GET`  | `/api/me` | Returns authenticated user ID and email |
+| Method | Endpoint | Description |
+| :----: | :------- | :---------- |
+| `GET` | `/api/me` | Returns current user ID and email |
+| `GET` | `/api/auth/me` | Returns authenticated user details |
 
 </details>
 
 <details>
-<summary><kbd>&nbsp;🏢 Company Profile&nbsp;</kbd></summary>
+<summary><kbd> 🏢 Organization & Multi-Tenancy</kbd></summary>
 <br />
 
-| Method | Endpoint              | Description                                               |
-| :----: | :-------------------- | :-------------------------------------------------------- |
-| `GET`  | `/api/profile/status` | Check profile existence, completeness, and missing fields |
-| `PUT`  | `/api/profile`        | Create or update company profile                          |
+| Method | Endpoint | Description |
+| :----: | :------- | :---------- |
+| `POST` | `/api/orgs` | Create a new organization (sets user as owner) |
+| `POST` | `/api/orgs/join` | Join an organization using a 6-character invite code |
+| `GET` | `/api/orgs/members` | List members and roles for the current organization |
+| `POST` | `/api/orgs/invite/regenerate` | Regenerate a new invite code (owner/admin only) |
 
 </details>
 
 <details>
-<summary><kbd>&nbsp;📄 Tender Analysis&nbsp;</kbd></summary>
+<summary><kbd> 📋 Company Profile</kbd></summary>
 <br />
 
-| Method | Endpoint             | Description                                         |
-| :----: | :------------------- | :-------------------------------------------------- |
-| `POST` | `/api/upload-tender` | Upload PDF → RAG extraction → Bid/No-Bid evaluation |
-| `GET`  | `/api/my-analyses`   | List all past tender analyses                       |
-| `GET`  | `/api/analysis/{id}` | Get full detail for a specific analysis             |
+| Method | Endpoint | Description |
+| :----: | :------- | :---------- |
+| `GET` | `/api/profile/status` | Check profile existence, completeness percentage, and missing fields |
+| `PUT` | `/api/profile` | Create or update organization profile (capabilities, certs, budget thresholds) |
 
 </details>
 
 <details>
-<summary><kbd>&nbsp;📅 Utilities&nbsp;</kbd></summary>
+<summary><kbd> 📄 Tender Ingestion & Analysis</kbd></summary>
 <br />
 
-| Method | Endpoint                 | Description                                          |
-| :----: | :----------------------- | :--------------------------------------------------- |
-| `POST` | `/api/generate-calendar` | Generate `.ics` calendar file from a deadline string |
+| Method | Endpoint | Description |
+| :----: | :------- | :---------- |
+| `POST` | `/api/process-tender` | Upload PDF/Scan → Docling/RapidOCR text extraction → BGE-M3 embedding → pgvector → Groq LLM extraction → 4-Phase Bid/No-Bid Evaluation |
+| `POST` | `/api/upload-tender` | Alias for single tender processing |
+| `POST` | `/api/tenders/process` | Standard REST route for tender processing |
+| `POST` | `/api/tenders/batch` | Upload multiple tender files for asynchronous batch evaluation |
+| `GET` | `/api/my-analyses` | List all historical tender analyses for the organization |
+| `GET` | `/api/tenders` | REST alias for listing historical analyses |
+| `GET` | `/api/analysis/{id}` | Get complete evaluation breakdown, factor scores, and extracted RFP metadata |
+| `GET` | `/api/tenders/{id}` | REST alias for retrieving a specific tender analysis |
+| `POST` | `/api/tenders/compare` | Compare 2+ analyzed tenders side-by-side with LLM comparative summary |
+
+</details>
+
+<details>
+<summary><kbd> 🤖 AI Proposal Generation (LangGraph)</kbd></summary>
+<br />
+
+| Method | Endpoint | Description |
+| :----: | :------- | :---------- |
+| `POST` | `/api/tenders/{id}/proposal` | Run LangGraph state machine (Planner → Drafter → Reviewer) to generate a tailored proposal |
+| `GET` | `/api/proposals/{id}` | Retrieve generated proposal draft by ID |
+| `GET` | `/api/proposals` | List all generated proposal drafts for the organization |
+
+</details>
+
+<details>
+<summary><kbd> 🌍 Market Tender Discovery</kbd></summary>
+<br />
+
+| Method | Endpoint | Description |
+| :----: | :------- | :---------- |
+| `GET` | `/api/market-tenders` | Query discovered public tenders with sector and deadline filters |
+| `POST` | `/api/market-tenders/discover` | Trigger live scraping job across public procurement portals (CPPP, GeM) |
+
+</details>
+
+<details>
+<summary><kbd> 📦 Batch Jobs</kbd></summary>
+<br />
+
+| Method | Endpoint | Description |
+| :----: | :------- | :---------- |
+| `GET` | `/api/batches` | List all background batch processing jobs for the organization |
+| `GET` | `/api/batches/{id}` | Get status, progress, and individual results for a batch job |
+
+</details>
+
+<details>
+<summary><kbd> 📅 Utilities & PDF Export</kbd></summary>
+<br />
+
+| Method | Endpoint | Description |
+| :----: | :------- | :---------- |
+| `POST` | `/api/generate-calendar` | Generate and download an `.ics` iCalendar file for tender submission deadlines |
+| `GET` | `/api/tenders/{id}/export-pdf` | Generate and download a styled evaluation report PDF via WeasyPrint & Jinja2 |
 
 </details>
 
@@ -466,7 +557,7 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
 - [X] **Phase 1: Backend API + RAG Pipeline**
   - [X] Supabase JWT authentication with dev bypass
   - [X] Company profile CRUD with completeness validation
-  - [X] PDF upload → Docling extraction → Voyage AI embedding → pgvector storage
+  - [X] PDF upload → Docling extraction → Hugging Face BGE-M3 embedding → pgvector storage
   - [X] Groq Llama 3.3 structured data extraction
   - [X] Hybrid 4-phase Bid/No-Bid evaluation engine
   - [X] Tender analysis history (save, list, detail)
@@ -484,13 +575,15 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
   - [ ] Vercel deployment (frontend)
   - [ ] Production environment hardening
   - [ ] Performance optimization + Lighthouse audit
-- [ ] **Phase 4: Future Enhancements**
+- [X] **Phase 4: Future Enhancements**
   - [ ] Cloud GPU migration for faster processing
-  - [ ] Multi-user per organization (team features)
-  - [ ] Tender comparison (side-by-side analysis)
+  - [X] Multi-user per organization (team features)
+  - [X] Tender comparison (side-by-side analysis)
   - [ ] Email notifications for upcoming deadlines
-  - [ ] Batch PDF upload support
-  - [ ] Export evaluation reports as PDF
+  - [X] Batch PDF upload support
+  - [X] Export evaluation reports as PDF
+  - [X] AI Proposal Writing Engine (LangGraph)
+  - [X] Market Tender Discovery (Scraping)
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
@@ -502,20 +595,20 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
 
 ### Development Hardware
 
-| Component | Specification             |
-| :-------- | :------------------------ |
-| **GPU**   | NVIDIA RTX 5050 (Laptop)  |
-| **RAM**   | 24 GB DDR5                |
-| **CPU**   | Intel Core Ultra 7        |
+| Component     | Specification            |
+| :------------ | :----------------------- |
+| **GPU** | NVIDIA RTX 5050 (Laptop) |
+| **RAM** | 24 GB DDR5               |
+| **CPU** | Intel Core Ultra 7       |
 
 ### Current Constraints
 
-| Limitation             | Detail                                                                                                     | Planned Resolution                                         |
-| :--------------------- | :--------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------- |
-| **Processing Speed**   | A single ~100-page RFP takes **30–90 seconds** to fully process through the extraction + evaluation pipeline | Cloud GPU migration (RunPod / Lambda Labs) to bring this down to ~5–10 seconds |
-| **Concurrency**        | Single-user experience; simultaneous uploads are processed sequentially                                    | Horizontal scaling on cloud infrastructure                 |
-| **Availability**       | Backend is only available while the dev machine is running                                                  | 24/7 cloud deployment                                     |
-| **VRAM Pressure**      | Docling's internal models require ~2–4 GB VRAM, leaving limited headroom for parallel tasks                 | Dedicated GPU server with ≥24 GB VRAM                      |
+| Limitation                 | Detail                                                                                                             | Planned Resolution                                                              |
+| :------------------------- | :----------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------ |
+| **Processing Speed** | A single ~100-page RFP takes**30–90 seconds** to fully process through the extraction + evaluation pipeline | Cloud GPU migration (RunPod / Lambda Labs) to bring this down to ~5–10 seconds |
+| **Concurrency**      | Single-user experience; simultaneous uploads are processed sequentially                                            | Horizontal scaling on cloud infrastructure                                      |
+| **Availability**     | Backend is only available while the dev machine is running                                                         | 24/7 cloud deployment                                                           |
+| **VRAM Pressure**    | Docling's internal models require ~2–4 GB VRAM, leaving limited headroom for parallel tasks                       | Dedicated GPU server with ≥24 GB VRAM                                          |
 
 > [!TIP]
 > Despite these hardware constraints, the **core architecture is production-ready**. The RAG pipeline, Bid/No-Bid engine, auth flow, and multi-tenant data isolation are all built to scale. The only bottleneck is compute, which is a deployment concern, not an architecture concern.
@@ -530,11 +623,11 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
 
 This project is shared publicly for **portfolio and educational purposes only**.
 
-| ✅ Permitted                                                                          | ❌ Not Permitted                                                                      |
-| :------------------------------------------------------------------------------------ | :------------------------------------------------------------------------------------ |
-| View source code for personal learning                                                | Copy, redistribute, or republish this codebase as your own                            |
-| Reference the project in articles or academic work (with attribution)                 | Use this code in commercial products or services                                      |
-| Fork the repository for personal, non-commercial experimentation                      | Create derivative works for public distribution without written permission            |
+| ✅ Permitted                                                          | ❌ Not Permitted                                                           |
+| :-------------------------------------------------------------------- | :------------------------------------------------------------------------- |
+| View source code for personal learning                                | Copy, redistribute, or republish this codebase as your own                 |
+| Reference the project in articles or academic work (with attribution) | Use this code in commercial products or services                           |
+| Fork the repository for personal, non-commercial experimentation      | Create derivative works for public distribution without written permission |
 
 See the full [`LICENSE`](LICENSE) file for details. For inquiries, [contact the author](#-author).
 
@@ -566,18 +659,18 @@ See the full [`LICENSE`](LICENSE) file for details. For inquiries, [contact the 
 
 ## 🙏 Acknowledgments
 
-| | Tool | Role in TenderSync |
-| :---: | :--- | :--- |
-| <img src="https://cdn.simpleicons.org/fastapi/009688" width="18" /> | [FastAPI](https://fastapi.tiangolo.com/) | Backend web framework |
-| <img src="https://cdn.simpleicons.org/supabase/3ECF8E" width="18" /> | [Supabase](https://supabase.com/) | Auth, database, vector storage |
-| <img src="https://cdn.simpleicons.org/nextdotjs/ffffff" width="18" /> | [Next.js](https://nextjs.org/) | Frontend framework |
-| <img src="https://cdn.simpleicons.org/tailwindcss/06B6D4" width="18" /> | [Tailwind CSS](https://tailwindcss.com/) | Utility-first styling |
-| <img src="https://cdn.simpleicons.org/shadcnui/ffffff" width="18" /> | [shadcn/ui](https://ui.shadcn.com/) | Component library |
-| 📄 | [Docling](https://github.com/docling-project/docling) | PDF extraction engine |
-| 🤖 | [Groq](https://groq.com/) | LLM inference |
-| 🧠 | [Voyage AI](https://www.voyageai.com/) | Embedding generation |
-| 🛡️ | [Shields.io](https://shields.io/) | README badges |
-| 🎨 | [Skill Icons](https://skillicons.dev/) | Tech stack visuals |
+|      | Tool                                                 | Role in TenderSync             |
+| :--: | :--------------------------------------------------- | :----------------------------- |
+|      | [FastAPI](https://fastapi.tiangolo.com/)              | Backend web framework          |
+|      | [Supabase](https://supabase.com/)                     | Auth, database, vector storage |
+|      | [Next.js](https://nextjs.org/)                        | Frontend framework             |
+|      | [Tailwind CSS](https://tailwindcss.com/)              | Utility-first styling          |
+|      | [shadcn/ui](https://ui.shadcn.com/)                   | Component library              |
+|  📄  | [Docling](https://github.com/docling-project/docling) | PDF extraction engine          |
+|  🤖  | [Groq](https://groq.com/)                             | LLM inference                  |
+|  🧠  | [Hugging Face](https://huggingface.co/)               | BGE-M3 Embedding generation    |
+| 🛡️ | [Shields.io](https://shields.io/)                     | README badges                  |
+|  🎨  | [Skill Icons](https://skillicons.dev/)                | Tech stack visuals             |
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 

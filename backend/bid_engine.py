@@ -10,6 +10,7 @@ Industry-aligned hybrid evaluation:
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -83,7 +84,7 @@ class EvaluationResult(BaseModel):
 def normalize_company_profile(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Fill missing profile fields so the engine works before DB migration."""
     profile = dict(raw)
-    profile.setdefault("company_name", "")
+    profile.setdefault("organization_name", "")
     profile.setdefault("active_certifications", [])
     profile.setdefault("core_capabilities", [])
     profile.setdefault("past_performance_sectors", [])
@@ -96,7 +97,11 @@ def normalize_company_profile(raw: Dict[str, Any]) -> Dict[str, Any]:
     return profile
 
 
-def _normalize(text: str) -> str:
+def _normalize(text: Any) -> str:
+    if isinstance(text, dict):
+        text = " ".join(str(v) for v in text.values())
+    elif not isinstance(text, str):
+        text = str(text or "")
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
@@ -104,14 +109,34 @@ def _parse_monetary_value(text: str) -> Optional[float]:
     if not text:
         return None
     cleaned = text.lower().replace(",", "")
-    multipliers = {"k": 1_000, "m": 1_000_000, "b": 1_000_000_000}
+    multipliers = {
+        "crores": 10_000_000,
+        "crore": 10_000_000,
+        "cr": 10_000_000,
+        "lakhs": 100_000,
+        "lakh": 100_000,
+        "lacs": 100_000,
+        "lac": 100_000,
+        "billion": 1_000_000_000,
+        "b": 1_000_000_000,
+        "million": 1_000_000,
+        "m": 1_000_000,
+        "thousand": 1_000,
+        "k": 1_000,
+    }
+    for word, mult in multipliers.items():
+        m = re.search(r"([\d.]+)\s*" + word, cleaned)
+        if m:
+            try:
+                return float(m.group(1)) * mult
+            except ValueError:
+                pass
     amounts: List[float] = []
-    for match in re.finditer(r"[\$£€]?\s*([\d.]+)\s*([kmb])?", cleaned):
-        val = float(match.group(1))
-        suffix = match.group(2)
-        if suffix and suffix in multipliers:
-            val *= multipliers[suffix]
-        amounts.append(val)
+    for match in re.finditer(r"[\$£€₹]?\s*([\d.]+)", cleaned):
+        try:
+            amounts.append(float(match.group(1)))
+        except ValueError:
+            pass
     return max(amounts) if amounts else None
 
 
@@ -332,9 +357,10 @@ Be conservative. Do not inflate scores without evidence from the data above."""
 def run_bid_evaluation(
     tender: Dict[str, Any],
     profile: Dict[str, Any],
-    groq_client: Any,
-    model: str = "llama-3.3-70b-versatile",
+    groq_client: Any = None,
+    model: Optional[str] = None,
 ) -> Dict[str, Any]:
+    model = model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     profile = normalize_company_profile(profile)
 
     gates = evaluate_hard_gates(tender, profile)

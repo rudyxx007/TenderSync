@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Evaluation Report - {{ filename }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
+        h1 { color: #2c3e50; border-bottom: 2px solid #2c3e50; padding-bottom: 10px; }
+        h2 { color: #34495e; margin-top: 30px; }
+        .header { margin-bottom: 40px; }
+        .summary-box { background: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
+        .badge { display: inline-block; padding: 5px 10px; border-radius: 3px; font-weight: bold; color: white; }
+        .badge-BID { background: #27ae60; }
+        .badge-CONDITIONAL { background: #f39c12; }
+        .badge-NO-BID { background: #c0392b; }
+        .radar-chart { text-align: center; margin: 40px 0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
+        th { background: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Tender Evaluation Report</h1>
+        <p><strong>Filename:</strong> {{ filename }}</p>
+        <p><strong>Generated on:</strong> {{ created_at }}</p>
+    </div>
+    
+    <div class="summary-box">
+        <h2>Executive Summary</h2>
+        <p><strong>Decision:</strong> <span class="badge badge-{{ decision }}">{{ decision }}</span></p>
+        <p><strong>Win Probability Score:</strong> {{ win_probability_score }} / 100</p>
+        <p><strong>Rationale:</strong> {{ rationale }}</p>
+    </div>
+    
+    <div class="radar-chart">
+        <h2>Scoring Breakdown</h2>
+        <img src="{{ image_data_uri }}" alt="Radar Chart" />
+    </div>
+    
+    <h2>Factor Scores</h2>
+    <table>
+        <tr><th>Factor</th><th>Score (1-5)</th></tr>
+        {% for factor, score in factor_scores.items() %}
+        <tr><td>{{ factor }}</td><td>{{ score }}</td></tr>
+        {% endfor %}
+    </table>
+    
+    <h2>Hard Gates</h2>
+    <table>
+        <tr><th>Gate</th><th>Status</th></tr>
+        {% for gate_name, gate_status in hard_gates %}
+        <tr><td>{{ gate_name }}</td><td>{{ "✅ PASS" if gate_status else "❌ FAIL" }}</td></tr>
+        {% endfor %}
+    </table>
+</body>
+</html>

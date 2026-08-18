@@ -1,10 +1,21 @@
 tendersync_modern_architecture.png
 Future_Works.txt
-venv/
-__pycache__/
-.env
-Sample Tenders/
-supabase/
 TenderSync_PRD.docx
 docs/
 Possible-Prompt-Lovable.txt
+Sample Tenders/
+backend/supabase/
+
+# Python & Environment
+venv/
+*/venv/
+.env
+*.env
+backend/.env
+
+# Caches
+__pycache__/
+*/__pycache__/
+*.py[cod]
+.pytest_cache/
+*/.pytest_cache/
