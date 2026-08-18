@@ -96,7 +96,7 @@ graph TD
     B --> C["✂️ Intelligent Chunking"]
     C --> D["🧠 Hugging Face BGE-M3 Embeddings"]
     D --> E["💾 Supabase pgvector"]
-    E --> F["🤖 Groq · Llama 3.3<br/>Structured Extraction"]
+    E --> F["🤖 Groq · GPT-OSS-120B<br/>Structured Extraction"]
     F --> G["⚖️ Hybrid Bid/No-Bid Engine"]
     G --> H{"Decision"}
     H -->|PWin ≥ 65| I["✅ BID"]
@@ -114,7 +114,7 @@ graph TD
 | :---------: | :------------------------------------------------------------------------------- | :------------------- |
 | **A** | **Hard Gate Checks**: deal killers like value mismatch or missing certs    | Deterministic rules  |
 | **B** | **Numeric/Keyword Scoring**: capability overlap, cert matches, budget fit  | Algorithmic scoring  |
-| **C** | **LLM Subjective Scoring**: competitive landscape, strategic alignment     | Groq Llama 3.3       |
+| **C** | **LLM Subjective Scoring**: competitive landscape, strategic alignment     | Groq GPT-OSS-120B    |
 | **D** | **Weighted PWin Calculation**: 7 dimensions aggregated into a 0–100 score | Weighted aggregation |
 
 ### The 7 Scoring Dimensions
@@ -139,7 +139,7 @@ graph TD
   <tr>
     <td width="50%" valign="top">
       <h3>🧠 AI-Powered Extraction</h3>
-      <p>Leverages <b>Groq Llama 3.3</b> and <b>Hugging Face BGE-M3</b> embeddings within a full RAG pipeline to extract tender IDs, issuing authorities, deadlines, budgets, deliverables, and compliance criteria from raw PDF documents.</p>
+      <p>Leverages <b>Groq GPT-OSS-120B</b> and <b>Hugging Face BGE-M3</b> embeddings within a full RAG pipeline to extract tender IDs, issuing authorities, deadlines, budgets, deliverables, and compliance criteria from raw PDF documents.</p>
     </td>
     <td width="50%" valign="top">
       <h3>🚦 Hybrid Bid/No-Bid Engine</h3>
@@ -249,8 +249,8 @@ graph TD
       <br /><sub><b>Pydantic</b></sub>
     </td>
     <td align="center" width="96">
-      <a href="https://llama.meta.com/"><img src="https://cdn.simpleicons.org/meta/0668E1" width="48" height="48" alt="Meta Llama 3.3" /></a>
-      <br /><sub><b>Llama 3.3</b><br/>(via Groq)</sub>
+      <a href="https://groq.com/"><img src="https://cdn.simpleicons.org/groq/F55036" width="48" height="48" alt="Groq GPT-OSS-120B" /></a>
+      <br /><sub><b>GPT-OSS-120B</b><br/>(via Groq)</sub>
     </td>
     <td align="center" width="96">
       <a href="https://github.com/docling-project/docling"><img src="https://cdn.simpleicons.org/readthedocs/8CA1AF" width="48" height="48" alt="Docling" /></a>
@@ -265,7 +265,7 @@ graph TD
 | :------------------- | :--------------------------------------------------------------------------------------- |
 | **Frontend**   | Next.js 15 (App Router) · TypeScript · Tailwind CSS · shadcn/ui                       |
 | **Backend**    | FastAPI · Python 3.10+ · Pydantic · Uvicorn                                           |
-| **AI / ML**    | Groq Llama 3.3 (Extraction) · Hugging Face BGE-M3 (Embeddings) · Docling (PDF Parsing) |
+| **AI / ML**    | Groq GPT-OSS-120B (Extraction) · Hugging Face BGE-M3 (Embeddings) · Docling (PDF Parsing) |
 | **Database**   | Supabase PostgreSQL + pgvector + Row-Level Security                                      |
 | **Auth**       | Supabase Auth (JWT) ·`@supabase/ssr`                                                  |
 | **Deployment** | Vercel (Frontend) · Local GPU Server (Backend)                                          |
