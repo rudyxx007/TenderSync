@@ -220,69 +220,99 @@ graph TD
 <br />
 <table>
   <tr>
-    <td align="center" width="96">
+    <td align="center" width="110">
       <a href="https://nextjs.org/"><img src="https://skillicons.dev/icons?i=nextjs" width="48" height="48" alt="Next.js" /></a>
       <br /><sub><b>Next.js 15</b></sub>
     </td>
-    <td align="center" width="96">
+    <td align="center" width="110">
       <a href="https://www.typescriptlang.org/"><img src="https://skillicons.dev/icons?i=ts" width="48" height="48" alt="TypeScript" /></a>
       <br /><sub><b>TypeScript</b></sub>
     </td>
-    <td align="center" width="96">
-      <a href="https://tailwindcss.com/"><img src="https://skillicons.dev/icons?i=tailwind" width="48" height="48" alt="Tailwind" /></a>
+    <td align="center" width="110">
+      <a href="https://tailwindcss.com/"><img src="https://skillicons.dev/icons?i=tailwind" width="48" height="48" alt="Tailwind CSS" /></a>
       <br /><sub><b>Tailwind CSS</b></sub>
     </td>
-    <td align="center" width="96">
+    <td align="center" width="110">
       <a href="https://www.python.org/"><img src="https://skillicons.dev/icons?i=python" width="48" height="48" alt="Python" /></a>
       <br /><sub><b>Python 3.10+</b></sub>
     </td>
-    <td align="center" width="96">
+    <td align="center" width="110">
       <a href="https://fastapi.tiangolo.com/"><img src="https://skillicons.dev/icons?i=fastapi" width="48" height="48" alt="FastAPI" /></a>
       <br /><sub><b>FastAPI</b></sub>
     </td>
-    <td align="center" width="96">
+    <td align="center" width="110">
       <a href="https://supabase.com/"><img src="https://skillicons.dev/icons?i=supabase" width="48" height="48" alt="Supabase" /></a>
       <br /><sub><b>Supabase</b></sub>
     </td>
   </tr>
   <tr>
-    <td align="center" width="96">
+    <td align="center" width="110">
+      <a href="https://openai.com/"><img src="https://cdn.simpleicons.org/openai/ffffff" width="48" height="48" alt="OpenAI" /></a>
+      <br /><sub><b>GPT-OSS-120B</b><br/>(OpenAI)</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://huggingface.co/BAAI/bge-m3"><img src="https://cdn.simpleicons.org/huggingface/FFD21E" width="48" height="48" alt="Hugging Face" /></a>
+      <br /><sub><b>BAAI/bge-m3</b><br/>(Hugging Face)</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://www.langchain.com/langgraph"><img src="https://cdn.simpleicons.org/langchain/ffffff" width="48" height="48" alt="LangGraph" /></a>
+      <br /><sub><b>LangGraph</b><br/>(Multi-Agent)</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://www.postgresql.org/"><img src="https://skillicons.dev/icons?i=postgres" width="48" height="48" alt="PostgreSQL" /></a>
+      <br /><sub><b>PostgreSQL</b><br/>(pgvector)</sub>
+    </td>
+    <td align="center" width="110">
       <a href="https://vercel.com/"><img src="https://skillicons.dev/icons?i=vercel" width="48" height="48" alt="Vercel" /></a>
       <br /><sub><b>Vercel</b></sub>
     </td>
-    <td align="center" width="96">
-      <a href="https://www.postgresql.org/"><img src="https://skillicons.dev/icons?i=postgres" width="48" height="48" alt="PostgreSQL" /></a>
-      <br /><sub><b>PostgreSQL</b></sub>
-    </td>
-    <td align="center" width="96">
+    <td align="center" width="110">
       <a href="https://ui.shadcn.com/"><img src="https://cdn.simpleicons.org/shadcnui/ffffff" width="48" height="48" alt="shadcn/ui" /></a>
       <br /><sub><b>shadcn/ui</b></sub>
     </td>
-    <td align="center" width="96">
-      <a href="https://docs.pydantic.dev/"><img src="https://cdn.simpleicons.org/pydantic/E92063" width="48" height="48" alt="Pydantic" /></a>
-      <br /><sub><b>Pydantic</b></sub>
-    </td>
-    <td align="center" width="96">
-      <a href="https://groq.com/"><img src="https://cdn.simpleicons.org/groq/F55036" width="48" height="48" alt="Groq GPT-OSS-120B" /></a>
-      <br /><sub><b>GPT-OSS-120B</b><br/>(via Groq)</sub>
-    </td>
-    <td align="center" width="96">
+  </tr>
+  <tr>
+    <td align="center" width="110">
       <a href="https://github.com/docling-project/docling"><img src="https://cdn.simpleicons.org/readthedocs/8CA1AF" width="48" height="48" alt="Docling" /></a>
-      <br /><sub><b>Docling</b></sub>
+      <br /><sub><b>Docling</b><br/>(IBM Parsing)</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://plotly.com/"><img src="https://cdn.simpleicons.org/plotly/3F4F75" width="48" height="48" alt="Plotly" /></a>
+      <br /><sub><b>Plotly</b><br/>(Radar Charts)</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://www.selenium.dev/"><img src="https://skillicons.dev/icons?i=selenium" width="48" height="48" alt="Selenium" /></a>
+      <br /><sub><b>Selenium</b><br/>(Web Scraping)</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://docs.pydantic.dev/"><img src="https://cdn.simpleicons.org/pydantic/E92063" width="48" height="48" alt="Pydantic" /></a>
+      <br /><sub><b>Pydantic v2</b></sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://weasyprint.org/"><img src="https://cdn.simpleicons.org/w3c/005A9C" width="48" height="48" alt="WeasyPrint" /></a>
+      <br /><sub><b>WeasyPrint</b><br/>(PDF Reports)</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://docs.pytest.org/"><img src="https://cdn.simpleicons.org/pytest/0A9EDC" width="48" height="48" alt="Pytest" /></a>
+      <br /><sub><b>Pytest</b><br/>(Automated QA)</sub>
     </td>
   </tr>
 </table>
 <br />
 </div>
 
-| Layer                | Technologies                                                                             |
-| :------------------- | :--------------------------------------------------------------------------------------- |
-| **Frontend**   | Next.js 15 (App Router) · TypeScript · Tailwind CSS · shadcn/ui                       |
-| **Backend**    | FastAPI · Python 3.10+ · Pydantic · Uvicorn                                           |
-| **AI / ML**    | Groq GPT-OSS-120B (Extraction) · Hugging Face BGE-M3 (Embeddings) · Docling (PDF Parsing) |
-| **Database**   | Supabase PostgreSQL + pgvector + Row-Level Security                                      |
-| **Auth**       | Supabase Auth (JWT) ·`@supabase/ssr`                                                  |
-| **Deployment** | Vercel (Frontend) · Local GPU Server (Backend)                                          |
+| Layer | Technologies & Ecosystem |
+| :--- | :--- |
+| **Frontend** | **Next.js 15** (App Router) · **TypeScript** · **Tailwind CSS** · **shadcn/ui** · **Radix UI** · **Lucide Icons** |
+| **Backend API** | **FastAPI** · **Python 3.10+** · **Pydantic v2** · **Uvicorn** (ASGI) · Domain-Driven Routers |
+| **AI Models & Agents** | **OpenAI GPT-OSS-120B** (via Groq Inference) · **LangGraph** (Multi-Agent State Machine: Analyst, Researcher, Writer, Reviewer) |
+| **RAG & Embeddings** | **Hugging Face BAAI/bge-m3** (1024-dim dense vectors) · **LangChain** (Recursive Semantic Text Splitters) |
+| **Document Ingestion** | **Docling** (IBM Deep Search Parser) · **RapidOCR** (ONNX Scan OCR Engine) · **PyPDFium2** |
+| **Database & Vector Store** | **Supabase** · **PostgreSQL** · **pgvector** (IVFFlat Indexing + Cosine Similarity RPC) · Multi-Tenant RLS |
+| **Tender Discovery** | **Selenium** (Headless Browser Automation) · **BeautifulSoup4** · **HTTPX** (CPPP Portal Scraper) |
+| **Export & Reporting** | **WeasyPrint** (HTML/CSS to PDF Engine) · **Plotly** (Polar Radar Visualizations) · **Jinja2** · **python-docx** |
+| **Auth & Security** | **Supabase Auth** (JWT Tokens) · **Role-Based Access Control (RBAC)** (`owner`/`admin`/`member`) |
+| **Testing & CI** | **Pytest** (68 Unit & Integration Tests — 100% Pass Rate) |
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
