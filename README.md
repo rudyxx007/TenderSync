@@ -558,7 +558,7 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
   - [X] Supabase JWT authentication with dev bypass
   - [X] Company profile CRUD with completeness validation
   - [X] PDF upload → Docling extraction → Hugging Face BGE-M3 embedding → pgvector storage
-  - [X] Groq Llama 3.3 structured data extraction
+  - [X] Groq GPT-OSS-120B structured data extraction
   - [X] Hybrid 4-phase Bid/No-Bid evaluation engine
   - [X] Tender analysis history (save, list, detail)
   - [X] Calendar export (.ics generation)
