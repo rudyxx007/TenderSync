@@ -131,9 +131,9 @@ graph TD
 | Compliance Readiness  |  15%  | Certification and regulatory coverage                 |
 | Commercial Viability  |  15%  | Budget alignment and contract value thresholds        |
 | Past Performance      |  15%  | Relevant sector experience                            |
+| Delivery Feasibility  |  15%  | Timeline, team capacity, and geographic coverage      |
 | Competitive Landscape |  10%  | Estimated competition intensity                       |
 | Strategic Alignment   |  10%  | Alignment with company's strategic focus areas        |
-| Delivery Feasibility  |  15%  | Timeline, team capacity, and geographic coverage      |
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
