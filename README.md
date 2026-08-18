@@ -14,7 +14,7 @@
   <h1>TenderSync</h1>
 
   <h3><strong>Autonomous Tender Intelligence & AI Proposal Engine</strong></h3>
-  <h4><sub>The engine behind your next government contract.</sub></h4>
+  <h3><sub>The engine behind your next government contract.</sub></h3>
 
   <br />
 
