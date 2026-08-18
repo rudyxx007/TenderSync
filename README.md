@@ -721,7 +721,7 @@ See the full [`LICENSE`](LICENSE) file for details. For inquiries, [contact the 
 ---
 
 <div align="center">
-  <sub>Built with ❤️ and way too much ☕ for smarter RFP decisions.</sub>
+  <h1>Built with ❤️ and way too much ☕ for smarter RFP decisions.</h1>
   <br /><br />
   <b>If this project interests you, consider leaving a ⭐</b>
 </div>
