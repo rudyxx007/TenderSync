@@ -619,15 +619,57 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
   - [ ] Vercel deployment (frontend)
   - [ ] Production environment hardening
   - [ ] Performance optimization + Lighthouse audit
-- [X] **Phase 4: Future Enhancements**
-  - [ ] Cloud GPU migration for faster processing
-  - [X] Multi-user per organization (team features)
-  - [X] Tender comparison (side-by-side analysis)
-  - [ ] Email notifications for upcoming deadlines
+- [ ] **Phase 4: Future Enhancements & Recommended Additions**
+  - [X] Multi-user per organization (team features / invite codes)
+  - [X] Tender comparison (side-by-side analysis + LLM summary)
+  - [X] Export evaluation reports as PDF (WeasyPrint + Jinja2)
+  - [X] AI Proposal Writing Engine (LangGraph state machine)
+  - [X] Market Tender Discovery (Live scraping of GeM/CPPP)
   - [X] Batch PDF upload support
-  - [X] Export evaluation reports as PDF
-  - [X] AI Proposal Writing Engine (LangGraph)
-  - [X] Market Tender Discovery (Scraping)
+  - [ ] Cloud GPU migration (RunPod / Lambda Labs for ultra-fast OCR/Docling)
+
+#### 🌟 Recommended Additions (Categorized Breakdown)
+
+<details open>
+<summary><kbd> 🚀 High Value (Product & Enterprise Impact)</kbd></summary>
+<br />
+
+| Feature | Description / Benefit | Status |
+| :------ | :-------------------- | :----: |
+| **Multi-Agent Validation** | Critic agent cross-verifying extracted JSON against raw tender text to eliminate hallucinations | 📋 Planned |
+| **Compliance Matrix Export** | One-click CSV/PDF mapping RFP requirements directly to company qualification evidence | 📋 Planned |
+| **Team / Org Accounts** | Multi-user collaboration under one organization with RBAC and shared tender workspaces | ✅ Complete |
+| **Win/Loss Feedback Loop** | Outcome tracking to dynamically calibrate PWin weights and scoring heuristics over time | 📋 Planned |
+| **Email Deadline Reminders** | Automated cron/scheduler notifications for approaching RFP submission deadlines | 📋 Planned |
+| **Audit Log System** | Enterprise-grade activity timeline tracking who uploaded, analyzed, or edited dossiers | 📋 Planned |
+
+</details>
+
+<details>
+<summary><kbd> ⚡ Medium Value (UX & Workflow Efficiency)</kbd></summary>
+<br />
+
+| Feature | Description / Benefit | Status |
+| :------ | :-------------------- | :----: |
+| **PDF Highlight Citations** | Visual grounding showing the exact bounding boxes and chunk sources for extracted data | 📋 Planned |
+| **Side-by-Side Comparison** | Multi-tender differential analysis with comparative LLM risk/feasibility breakdown | ✅ Complete |
+| **Saved Filters & Views** | Quick-filter presets (e.g., *"Only show BID decisions with PWin > 80%"*) | 📋 Planned |
+| **Webhooks & CRM Integration** | Bid sync and pipeline integration with Salesforce, HubSpot, and Slack | 📋 Planned |
+
+</details>
+
+<details>
+<summary><kbd> 🛠️ Infrastructure & Scalability</kbd></summary>
+<br />
+
+| Feature | Description / Benefit | Status |
+| :------ | :-------------------- | :----: |
+| **Cloudflare Tunnel** | Secure tunnel connecting local GPU FastAPI workers directly to the public Vercel frontend | 📋 Planned |
+| **Docker Compose Deployment** | Multi-container setup for one-command deployment across local and staging environments | 📋 Planned |
+| **Rate Limiting & Quotas** | Per-user and per-organization upload quotas and sliding-window rate limiters | 📋 Planned |
+| **Background Task Workers** | Distributed job queues (Celery/Redis) for instant asynchronous processing of 100+ page RFPs | 📋 Planned |
+
+</details>
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
