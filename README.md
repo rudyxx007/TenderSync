@@ -8,7 +8,7 @@
   <br />
 
   <a href="https://github.com/rudyxx007/TenderSync">
-    <img src="assets/tendersync_logo.png" alt="TenderSync" width="140" height="140" />
+    <img src="assets/tendersync_logo.png" alt="TenderSync" width="250" height="250" />
   </a>
 
   <h1>TenderSync</h1>
