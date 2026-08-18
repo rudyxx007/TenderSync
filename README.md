@@ -722,7 +722,7 @@ See the full [`LICENSE`](LICENSE) file for details. For inquiries, [contact the 
 
 <div align="center">
   <h3>Built with ❤️ and way too much ☕ for smarter RFP decisions.</h3>
-  <br /><br />
+  <br>
   <b>If this project interests you, consider leaving a ⭐</b>
 </div>
 
