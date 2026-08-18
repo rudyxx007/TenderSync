@@ -13,8 +13,8 @@
 
   <h1>TenderSync</h1>
 
-  <p><strong>AI-Powered RFP Bid/No-Bid Decision Intelligence Platform</strong></p>
-  <p><sub>Transform days of manual RFP analysis into a 2-minute automated decision.</sub></p>
+  <p><strong>Autonomous Tender Intelligence & AI Proposal Engine</strong></p>
+  <p><sub>The engine behind your next government contract.</sub></p>
 
   <br />
 
