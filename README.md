@@ -87,8 +87,8 @@ Government and enterprise bidding is notoriously high-friction, error-prone, and
 
 <br />
 
-> **TenderSync eliminates every bottleneck across the RFP lifecycle.**  
-> 📡 **Auto-discover** live market tenders ➔ 🧠 **Extract** 200+ page PDFs in seconds ➔ 🚦 **Screen** hard-gate deal-breakers ➔ 📊 **Score** win probability across 7 dimensions ➔ 🤖 **Draft** tailored proposals with multi-agent AI.
+**TenderSync eliminates every bottleneck across the RFP lifecycle.**  
+📡 **Auto-discover** live market tenders ➔ 🧠 **Extract** 200+ page PDFs in seconds ➔ 🚦 **Screen** hard-gate deal-breakers ➔ 📊 **Score** win probability across 7 dimensions ➔ 🤖 **Draft** tailored proposals with multi-agent AI.
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
