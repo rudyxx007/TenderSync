@@ -128,11 +128,11 @@ graph TD
 | Dimension             | Weight | What It Measures                                      |
 | :-------------------- | :----: | :---------------------------------------------------- |
 | Capability Fit        |  20%  | How well core capabilities match the RFP requirements |
-| Compliance Readiness  |  10%  | Certification and regulatory coverage                 |
+| Compliance Readiness  |  15%  | Certification and regulatory coverage                 |
 | Commercial Viability  |  15%  | Budget alignment and contract value thresholds        |
 | Past Performance      |  15%  | Relevant sector experience                            |
 | Competitive Landscape |  10%  | Estimated competition intensity                       |
-| Strategic Alignment   |  15%  | Alignment with company's strategic focus areas        |
+| Strategic Alignment   |  10%  | Alignment with company's strategic focus areas        |
 | Delivery Feasibility  |  15%  | Timeline, team capacity, and geographic coverage      |
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>

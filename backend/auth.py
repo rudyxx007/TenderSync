@@ -1,5 +1,3 @@
-"""Supabase JWT authentication for FastAPI."""
-
 import os
 from typing import Optional, Dict
 

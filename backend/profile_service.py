@@ -1,8 +1,5 @@
-"""Company profile CRUD and completeness validation."""
-
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
-
 from bid_engine import normalize_company_profile
 from schemas import CompanyProfileInput, CompanyProfileResponse, ProfileStatusResponse
 

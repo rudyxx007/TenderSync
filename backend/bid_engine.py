@@ -1,13 +1,3 @@
-"""
-TenderSync Bid/No-Bid Engine
-
-Industry-aligned hybrid evaluation:
-  Phase A — Deterministic hard gates (deal killers)
-  Phase B — Deterministic numeric/keyword scoring
-  Phase C — LLM structured scoring for subjective dimensions
-  Phase D — Weighted PWin calculation and final decision
-"""
-
 from __future__ import annotations
 
 import os
@@ -36,9 +26,9 @@ CERT_ALIASES: Dict[str, List[str]] = {
 # Weights must sum to 100.
 WEIGHTS: Dict[str, int] = {
     "capability_fit": 20,
-    "compliance_readiness": 10,
+    "compliance_readiness": 15,
     "past_performance": 15,
-    "competitive_position": 15,
+    "competitive_position": 10,
     "commercial_viability": 15,
     "resource_capacity": 15,
     "strategic_alignment": 10,
