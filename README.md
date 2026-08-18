@@ -255,7 +255,7 @@ graph TD
       <br /><sub><b>BAAI/bge-m3</b><br/>(Hugging Face)</sub>
     </td>
     <td align="center" width="110">
-      <a href="https://www.langchain.com/langgraph"><img src="https://api.iconify.design/logos:langchain-icon.svg" width="48" height="48" alt="LangGraph" /></a>
+      <a href="https://www.langchain.com/langgraph"><img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/langgraph-color.svg" width="48" height="48" alt="LangGraph" /></a>
       <br /><sub><b>LangGraph</b><br/>(Multi-Agent)</sub>
     </td>
     <td align="center" width="110">
