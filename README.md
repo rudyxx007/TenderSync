@@ -146,40 +146,48 @@ graph TD
     <td width="50%" valign="top">
       <h3>🧠 AI-Powered Extraction</h3>
       <p>Leverages <b>Groq GPT-OSS-120B</b> and <b>Hugging Face BGE-M3</b> embeddings within a full RAG pipeline to extract tender IDs, issuing authorities, deadlines, budgets, deliverables, and compliance criteria from raw PDF documents.</p>
+      <p></p>
     </td>
     <td width="50%" valign="top">
       <h3>🚦 Hybrid Bid/No-Bid Engine</h3>
       <p>A 4-phase engine combining <b>deterministic hard-gate checks</b> with <b>LLM-scored subjective dimensions</b> across 7 weighted factors, producing a mathematically grounded recommendation with full factor breakdowns.</p>
+      <p></p>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <h3>🏢 Multi-Tenant Profile Gating</h3>
       <p>Each user represents one company. Mandatory onboarding enforces completion of company name, certifications, and capabilities <b>before</b> any analysis is allowed, ensuring every evaluation is personalized.</p>
+      <p></p>
     </td>
     <td width="50%" valign="top">
       <h3>📊 Decision Dashboard</h3>
       <p>A dark-themed dashboard with a circular <b>PWin gauge</b>, color-coded decision indicators (emerald / amber / red), radar charts for factor breakdown, and hard-gate status pills.</p>
+      <p></p>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <h3>🌍 Market Tenders Discovery</h3>
       <p>Automated scraping of public portals (e.g., CPPP) to bring relevant market tenders directly into your dashboard. Evaluate public tenders with one click.</p>
+      <p></p>
     </td>
     <td width="50%" valign="top">
       <h3>⚖️ Side-by-Side Comparison</h3>
       <p>Compare two analyzed tenders side-by-side using Groq LLM to evaluate budget, deadlines, compliance, and deliverable differences.</p>
+      <p></p>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <h3>🤖 AI Proposal Writer (LangGraph)</h3>
       <p>A multi-agent orchestrator (Analyst, Researcher, Writer, Reviewer) that automatically generates a complete proposal draft based on the tender analysis and your company capabilities.</p>
+      <p></p>
     </td>
     <td width="50%" valign="top">
       <h3>📅 Calendar Export & PDF Reports</h3>
       <p>Generate downloadable <code>.ics</code> calendar files for deadlines, and export beautiful PDF reports of your tender evaluations using WeasyPrint and Plotly.</p>
+      <p></p>
     </td>
   </tr>
 </table>
