@@ -247,7 +247,7 @@ graph TD
   </tr>
   <tr>
     <td align="center" width="110">
-      <a href="https://openai.com/"><img src="https://cdn.simpleicons.org/openai/ffffff" width="48" height="48" alt="OpenAI" /></a>
+      <a href="https://openai.com/"><img src="https://api.iconify.design/logos:openai-icon.svg" width="48" height="48" alt="OpenAI" /></a>
       <br /><sub><b>GPT-OSS-120B</b><br/>(OpenAI)</sub>
     </td>
     <td align="center" width="110">
@@ -255,7 +255,7 @@ graph TD
       <br /><sub><b>BAAI/bge-m3</b><br/>(Hugging Face)</sub>
     </td>
     <td align="center" width="110">
-      <a href="https://www.langchain.com/langgraph"><img src="https://cdn.simpleicons.org/langchain/ffffff" width="48" height="48" alt="LangGraph" /></a>
+      <a href="https://www.langchain.com/langgraph"><img src="https://raw.githubusercontent.com/langchain-ai/langgraph/main/.github/images/logo-dark.svg" width="48" height="48" alt="LangGraph" /></a>
       <br /><sub><b>LangGraph</b><br/>(Multi-Agent)</sub>
     </td>
     <td align="center" width="110">
@@ -273,8 +273,8 @@ graph TD
   </tr>
   <tr>
     <td align="center" width="110">
-      <a href="https://github.com/docling-project/docling"><img src="https://cdn.simpleicons.org/readthedocs/8CA1AF" width="48" height="48" alt="Docling" /></a>
-      <br /><sub><b>Docling</b><br/>(IBM Parsing)</sub>
+      <a href="https://github.com/docling-project/docling"><img src="https://api.iconify.design/logos:ibm.svg" width="48" height="48" alt="IBM Docling" /></a>
+      <br /><sub><b>IBM Docling</b><br/>(Deep Search)</sub>
     </td>
     <td align="center" width="110">
       <a href="https://plotly.com/"><img src="https://cdn.simpleicons.org/plotly/3F4F75" width="48" height="48" alt="Plotly" /></a>
@@ -289,11 +289,11 @@ graph TD
       <br /><sub><b>Pydantic v2</b></sub>
     </td>
     <td align="center" width="110">
-      <a href="https://weasyprint.org/"><img src="https://cdn.simpleicons.org/w3c/005A9C" width="48" height="48" alt="WeasyPrint" /></a>
+      <a href="https://weasyprint.org/"><img src="https://weasyprint.org/css/img/logotype-picto.svg" width="48" height="48" alt="WeasyPrint" /></a>
       <br /><sub><b>WeasyPrint</b><br/>(PDF Reports)</sub>
     </td>
     <td align="center" width="110">
-      <a href="https://docs.pytest.org/"><img src="https://cdn.simpleicons.org/pytest/0A9EDC" width="48" height="48" alt="Pytest" /></a>
+      <a href="https://docs.pytest.org/"><img src="https://github.com/pytest-dev/pytest/raw/main/doc/en/img/pytest_logo_curves.svg" width="48" height="48" alt="Pytest" /></a>
       <br /><sub><b>Pytest</b><br/>(Automated QA)</sub>
     </td>
   </tr>
