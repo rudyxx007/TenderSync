@@ -73,16 +73,22 @@
 
 ## 🎯 The Problem
 
-Every year, companies lose **thousands of hours** and **significant revenue** sifting through 200+ page RFP documents, only to discover they don't qualify or the opportunity isn't worth pursuing.
+Government and enterprise bidding is notoriously high-friction, error-prone, and slow. B2B companies lose **thousands of hours and millions in revenue** chasing tenders they don't qualify for, missing critical deadlines, and drafting 50-page proposals from scratch under pressure.
 
-| Pain Point                                | Impact                                      |
-| :---------------------------------------- | :------------------------------------------ |
-| 📄 Reading 200+ pages per tender manually | **3–5 business days** per evaluation |
-| ❌ Missing mandatory compliance criteria  | Wasted bid preparation costs                |
-| 🎲 Gut-feel based Bid/No-Bid decisions    | Low win rates, wasted resources             |
-| 🔄 No institutional memory across bids    | Same mistakes repeated                      |
+| Lifecycle Stage | Traditional Pain Point | Business Impact |
+| :--- | :--- | :--- |
+| **🔍 Discovery** | Manually searching fragmented public portals (CPPP, GeM) | Missed deadlines & high opportunity scouting overhead |
+| **📄 Document Ingestion** | Reading 200+ page legalistic RFP PDFs manually | **3–5 business days** spent per evaluation |
+| **❌ Compliance Gating** | Overlooking hidden mandatory certs or eligibility criteria | Instant disqualification & wasted bid prep costs |
+| **🎲 Bid Qualification** | Bidding based on executive gut feeling rather than data | Low win rates & exhausted capture budgets |
+| **⚖️ Trade-off Analysis** | Inability to objectively compare concurrent tender opportunities | Misallocated team resources on low-yield bids |
+| **✍️ Proposal Drafting** | Writing technical responses & compliance matrices from scratch | Grueling 40-hour writing cycles & rushed submissions |
+| **🏢 Team Collaboration** | Disconnected bids with no shared institutional memory | Siloed teams & repeated historical mistakes |
 
-**TenderSync eliminates all of this.** Upload a PDF → get an AI-extracted summary → receive a weighted Probability of Win (PWin) score → make an informed BID, CONDITIONAL, or NO-BID decision in minutes.
+<br />
+
+> **TenderSync eliminates every bottleneck across the RFP lifecycle.**  
+> 📡 **Auto-discover** live market tenders ➔ 🧠 **Extract** 200+ page PDFs in seconds ➔ 🚦 **Screen** hard-gate deal-breakers ➔ 📊 **Score** win probability across 7 dimensions ➔ 🤖 **Draft** tailored proposals with multi-agent AI.
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
