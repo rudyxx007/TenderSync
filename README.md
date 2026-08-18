@@ -247,7 +247,7 @@ graph TD
   </tr>
   <tr>
     <td align="center" width="110">
-      <a href="https://openai.com/"><img src="https://api.iconify.design/logos:openai-icon.svg" width="48" height="48" alt="OpenAI" /></a>
+      <a href="https://openai.com/"><img src="https://api.iconify.design/simple-icons:openai.svg?color=%2310A37F" width="48" height="48" alt="OpenAI" /></a>
       <br /><sub><b>GPT-OSS-120B</b><br/>(OpenAI)</sub>
     </td>
     <td align="center" width="110">
@@ -255,7 +255,7 @@ graph TD
       <br /><sub><b>BAAI/bge-m3</b><br/>(Hugging Face)</sub>
     </td>
     <td align="center" width="110">
-      <a href="https://www.langchain.com/langgraph"><img src="https://raw.githubusercontent.com/langchain-ai/langgraph/main/.github/images/logo-dark.svg" width="48" height="48" alt="LangGraph" /></a>
+      <a href="https://www.langchain.com/langgraph"><img src="https://api.iconify.design/logos:langchain-icon.svg" width="48" height="48" alt="LangGraph" /></a>
       <br /><sub><b>LangGraph</b><br/>(Multi-Agent)</sub>
     </td>
     <td align="center" width="110">
@@ -273,7 +273,7 @@ graph TD
   </tr>
   <tr>
     <td align="center" width="110">
-      <a href="https://github.com/docling-project/docling"><img src="https://api.iconify.design/logos:ibm.svg" width="48" height="48" alt="IBM Docling" /></a>
+      <a href="https://github.com/docling-project/docling"><img src="https://api.iconify.design/simple-icons:ibm.svg?color=%230F62FE" width="48" height="48" alt="IBM Docling" /></a>
       <br /><sub><b>IBM Docling</b><br/>(Deep Search)</sub>
     </td>
     <td align="center" width="110">
@@ -293,7 +293,7 @@ graph TD
       <br /><sub><b>WeasyPrint</b><br/>(PDF Reports)</sub>
     </td>
     <td align="center" width="110">
-      <a href="https://docs.pytest.org/"><img src="https://github.com/pytest-dev/pytest/raw/main/doc/en/img/pytest_logo_curves.svg" width="48" height="48" alt="Pytest" /></a>
+      <a href="https://docs.pytest.org/"><img src="https://api.iconify.design/simple-icons:pytest.svg?color=%230A9EDC" width="48" height="48" alt="Pytest" /></a>
       <br /><sub><b>Pytest</b><br/>(Automated QA)</sub>
     </td>
   </tr>
