@@ -10,7 +10,6 @@
   <a href="https://github.com/rudyxx007/TenderSync">
     <img src="assets/tendersync_logo.png" alt="TenderSync" width="250" height="250" />
   </a>
-
   <h3><strong>Autonomous Tender Intelligence & AI Proposal Engine</strong></h3>
   <h3><sub>The engine behind your next government contract.</sub></h3>
 
