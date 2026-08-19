@@ -15,11 +15,15 @@ import {
   ShieldCheck, 
   Sparkles, 
   Table2, 
-  Workflow, 
   Zap 
 } from 'lucide-react';
 import { Brand } from '@/components/Brand';
 import { PwinGauge, DecisionBadge } from '@/components/PwinGauge';
+import { CardSpotlight } from '@/components/ui/CardSpotlight';
+import { MovingBorderCard } from '@/components/ui/MovingBorderCard';
+import { ShimmerButton } from '@/components/ui/ShimmerButton';
+import { Particles } from '@/components/ui/Particles';
+import { RetroGrid } from '@/components/ui/RetroGrid';
 
 const rotatingWords = [
   'Government RFPs',
@@ -99,15 +103,20 @@ export default function Landing() {
             <Link to="/login" className="px-3.5 py-2 text-xs font-bold text-zinc-300 transition hover:text-white">
               Sign in
             </Link>
-            <Link to="/signup" className="button-signal !px-4 !py-2 text-xs">
-              Start Free <ArrowRight size={14} />
+            <Link to="/signup">
+              <ShimmerButton className="!px-4 !py-2 text-xs">
+                Start Free <ArrowRight size={14} className="ml-1" />
+              </ShimmerButton>
             </Link>
           </div>
         </div>
       </header>
 
-      {/* Hero Section */}
+      {/* Hero Section with Particles & RetroGrid */}
       <section className="relative overflow-hidden border-b border-white/[.08] py-20 lg:py-32">
+        <Particles quantity={45} color="#34d399" className="opacity-40" />
+        <RetroGrid className="opacity-20" />
+
         {/* Ambient background glows */}
         <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 h-[500px] w-[800px] rounded-full bg-emerald-500/10 blur-[120px]" />
         <div className="pointer-events-none absolute top-1/3 right-10 h-[350px] w-[350px] rounded-full bg-violet-500/10 blur-[100px]" />
@@ -119,7 +128,7 @@ export default function Landing() {
               <motion.div 
                 initial={{ opacity: 0, y: 12 }} 
                 animate={{ opacity: 1, y: 0 }} 
-                className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3.5 py-1.5 font-mono text-[11px] font-semibold text-emerald-300"
+                className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3.5 py-1.5 font-mono text-[11px] font-semibold text-emerald-300 backdrop-blur-md"
               >
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
                 ENTERPRISE RFP DECISION INTELLIGENCE
@@ -167,8 +176,10 @@ export default function Landing() {
                 transition={{ delay: 0.24, duration: 0.5 }} 
                 className="mt-9 flex flex-wrap items-center gap-4"
               >
-                <Link to="/signup" className="button-signal !px-6 !py-3.5 text-sm font-bold shadow-lg shadow-emerald-500/20">
-                  Start Evaluating Free <ArrowRight size={16} />
+                <Link to="/signup">
+                  <ShimmerButton className="!px-6 !py-3.5 text-sm font-bold">
+                    Start Evaluating Free <ArrowRight size={16} className="ml-2" />
+                  </ShimmerButton>
                 </Link>
                 <Link to="/how-it-works" className="button-quiet !px-6 !py-3.5 text-sm font-bold">
                   Explore The Pipeline <ArrowUpRight size={16} />
@@ -191,54 +202,55 @@ export default function Landing() {
               </div>
             </div>
 
-            {/* Right: Live Interactive Sample Dossier Preview */}
+            {/* Right: Live Interactive Sample Dossier Preview inside MovingBorderCard */}
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }} 
               animate={{ opacity: 1, scale: 1, y: 0 }} 
               transition={{ delay: 0.28, duration: 0.6 }}
-              className="panel relative overflow-hidden p-6 shadow-2xl backdrop-blur-2xl"
             >
-              <div className="flex items-center justify-between border-b border-white/[.08] pb-4">
-                <div>
-                  <p className="eyebrow text-emerald-400">Live Sample Evaluation</p>
-                  <p className="mt-1 text-sm font-bold text-white">Federal Cloud Migration RFP</p>
-                </div>
-                <DecisionBadge decision="BID" />
-              </div>
-
-              <div className="mt-6 grid grid-cols-[1fr_1.2fr] items-center gap-6">
-                <div className="grid place-items-center border-r border-white/[.08] pr-4">
-                  <PwinGauge score={84} decision="BID" size={150} />
-                </div>
-                <div className="space-y-3">
+              <MovingBorderCard duration={6000} className="p-6">
+                <div className="flex items-center justify-between border-b border-white/[.08] pb-4">
                   <div>
-                    <p className="eyebrow">Strategic Verdict</p>
-                    <p className="mt-1 text-sm font-extrabold text-white">Strong Pursuit Signal (84% PWin)</p>
-                    <p className="mt-1 text-xs leading-5 text-zinc-400">
-                      Capability fit (20/20) and compliance ISO 27001 are fully verified.
-                    </p>
+                    <p className="eyebrow text-emerald-400">Live Sample Evaluation</p>
+                    <p className="mt-1 text-sm font-bold text-white">Federal Cloud Migration RFP</p>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 font-mono text-[10px]">
-                    <span className="rounded border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1.5 text-emerald-300">
-                      7/7 GATES PASSED
-                    </span>
-                    <span className="rounded border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1.5 text-emerald-300">
-                      94% CONFIDENCE
-                    </span>
+                  <DecisionBadge decision="BID" />
+                </div>
+
+                <div className="mt-6 grid grid-cols-[1fr_1.2fr] items-center gap-6">
+                  <div className="grid place-items-center border-r border-white/[.08] pr-4">
+                    <PwinGauge score={84} decision="BID" size={150} />
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <p className="eyebrow">Strategic Verdict</p>
+                      <p className="mt-1 text-sm font-extrabold text-white">Strong Pursuit Signal (84% PWin)</p>
+                      <p className="mt-1 text-xs leading-5 text-zinc-400">
+                        Capability fit (20/20) and compliance ISO 27001 are fully verified.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 font-mono text-[10px]">
+                      <span className="rounded border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1.5 text-emerald-300">
+                        7/7 GATES PASSED
+                      </span>
+                      <span className="rounded border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1.5 text-emerald-300">
+                        94% CONFIDENCE
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="mt-6 border-t border-white/[.08] pt-4 flex items-center justify-between text-xs">
-                <span className="text-zinc-500">Autonomous Proposal Draft:</span>
-                <span className="font-mono text-emerald-400">Ready in 5 sections</span>
-              </div>
+                <div className="mt-6 border-t border-white/[.08] pt-4 flex items-center justify-between text-xs">
+                  <span className="text-zinc-500">Autonomous Proposal Draft:</span>
+                  <span className="font-mono text-emerald-400">Ready in 5 sections</span>
+                </div>
+              </MovingBorderCard>
             </motion.div>
           </div>
         </div>
       </section>
 
-      {/* Features Bento Grid */}
+      {/* Features Bento Grid with CardSpotlight */}
       <section className="border-b border-white/[.08] bg-[#0E131F] py-20 lg:py-28">
         <div className="mx-auto max-w-7xl px-5 lg:px-10">
           <div className="max-w-2xl">
@@ -253,9 +265,10 @@ export default function Landing() {
 
           <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {features.map((f) => (
-              <div 
+              <CardSpotlight 
                 key={f.title}
-                className="panel group p-6 transition duration-300 hover:border-white/20 hover:-translate-y-1"
+                color={`${f.color}20`}
+                className="group"
               >
                 <div className="flex items-center justify-between">
                   <span 
@@ -268,7 +281,7 @@ export default function Landing() {
                 </div>
                 <h3 className="mt-6 text-base font-bold text-white">{f.title}</h3>
                 <p className="mt-2 text-xs leading-6 text-zinc-400">{f.text}</p>
-              </div>
+              </CardSpotlight>
             ))}
           </div>
         </div>
@@ -284,8 +297,10 @@ export default function Landing() {
             Join enterprise bid teams evaluating tenders with mathematical precision.
           </p>
           <div className="mt-8 flex justify-center gap-4">
-            <Link to="/signup" className="button-signal !px-6 !py-3.5 font-bold">
-              Start Free Evaluation <ArrowRight size={16} />
+            <Link to="/signup">
+              <ShimmerButton className="!px-6 !py-3.5 font-bold">
+                Start Free Evaluation <ArrowRight size={16} className="ml-2" />
+              </ShimmerButton>
             </Link>
             <Link to="/how-it-works" className="button-quiet !px-6 !py-3.5 font-bold">
               See How It Works
