@@ -696,7 +696,7 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
 | **Availability**     | Backend is only available while the dev machine is running                                                         | 24/7 cloud deployment                                                           |
 | **VRAM Pressure**    | Docling's internal models require ~2–4 GB VRAM, leaving limited headroom for parallel tasks                       | Dedicated GPU server with ≥24 GB VRAM                                          |
 
-> [!TIP]
+> [!NOTE]
 > Despite these hardware constraints, the **core architecture is production-ready**. The RAG pipeline, Bid/No-Bid engine, auth flow, and multi-tenant data isolation are all built to scale. The only bottleneck is compute, which is a deployment concern, not an architecture concern.
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
