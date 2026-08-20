@@ -601,35 +601,42 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
 
 ## Roadmap
 
-- [X] **Phase 1: Backend API + RAG Pipeline**
-  - [X] Supabase JWT authentication with dev bypass
-  - [X] Company profile CRUD with completeness validation
-  - [X] PDF upload → Docling extraction → Hugging Face BGE-M3 embedding → pgvector storage
-  - [X] Groq GPT-OSS-120B structured data extraction
-  - [X] Hybrid 4-phase Bid/No-Bid evaluation engine
-  - [X] Tender analysis history (save, list, detail)
-  - [X] Calendar export (.ics generation)
-- [ ] **Phase 2: Next.js Frontend**
-  - [ ] Landing page with animated hero + feature showcase
-  - [ ] Auth flow (login, signup, session management)
-  - [ ] Onboarding wizard (3-step company profile setup)
-  - [ ] Dashboard with PDF upload + result display
-  - [ ] Tender detail page with PWin gauge + factor breakdown
-  - [ ] History page with sortable analysis table
-  - [ ] Settings / profile edit page
-  - [ ] Dark mode, responsive layout, micro-animations
-- [ ] **Phase 3: Deployment + Polish**
-  - [ ] Vercel deployment (frontend)
-  - [ ] Production environment hardening
-  - [ ] Performance optimization + Lighthouse audit
-- [ ] **Phase 4: Future Enhancements & Recommended Additions**
-  - [X] Multi-user per organization (team features / invite codes)
-  - [X] Tender comparison (side-by-side analysis + LLM summary)
-  - [X] Export evaluation reports as PDF (WeasyPrint + Jinja2)
-  - [X] AI Proposal Writing Engine (LangGraph state machine)
-  - [X] Market Tender Discovery (Live scraping of GeM/CPPP)
-  - [X] Batch PDF upload support
-  - [ ] Cloud GPU migration (RunPod / Lambda Labs for ultra-fast OCR/Docling)
+- [X] **Phase 1: Backend API, Decision Engine & Intelligence Services**
+  - [X] Supabase JWT authentication, user resolution & multi-tenant RBAC (`owner`/`admin`/`member`)
+  - [X] Organization management with 8-character invite code generation and validation
+  - [X] Company capability & compliance profile CRUD with completeness gating
+  - [X] Document ingestion: Docling deep parsing, RapidOCR fallback & semantic text chunking
+  - [X] Vector embedding pipeline (Hugging Face BAAI/bge-m3 1024-dim dense vectors) + Supabase pgvector
+  - [X] Groq GPT-OSS-120B structured data extraction & confidence validation
+  - [X] 4-phase hybrid Bid/No-Bid evaluation engine across 7 weighted scoring dimensions
+  - [X] Multi-tender comparative analysis engine (side-by-side radar overlay & differential summary)
+  - [X] LangGraph multi-agent proposal generator (5 specialized proposal drafting agents)
+  - [X] Market tender discovery scraper for public procurement portals (CPPP, GeM)
+  - [X] Asynchronous batch PDF upload & evaluation worker
+  - [X] Calendar export (`.ics` generation) & executive PDF evaluation reports (WeasyPrint + Jinja2)
+  - [X] 68 automated unit & integration tests (100% pass rate)
+
+- [X] **Phase 2: Modern Web Application (React 19 + Vite 7 + TanStack Router)**
+  - [X] High-end dark theme design system built with Tailwind CSS v4 & custom glassmorphism
+  - [X] Interactive visual component suite (Spotlights, animated border beams, shimmer buttons, particle canvas & retro perspective grid)
+  - [X] Cinematic Landing page with rotating text flip & live sample audit teaser
+  - [X] Dedicated educational pages: How It Works (`/how-it-works`) and About (`/about`)
+  - [X] Authentication surfaces (Login & Signup) with live decision preview and invite code detection
+  - [X] 3-step company onboarding wizard & profile capability management
+  - [X] Command center dashboard with drag-and-drop RFP upload & live 5-stage pipeline trace
+  - [X] Executive dossier view with circular PWin gauge, hard-gate checks, 7-dimension radar fit chart & PDF export
+  - [X] Interactive Proposal Editor with section-by-section AI drafting & Microsoft Word (`.docx`) export
+  - [X] Multi-tender side-by-side comparison matrix with overlaid radar visualizations
+  - [X] Public market tender discovery browser with 1-click evaluation
+
+- [X] **Phase 3: Production Deployment, Hardening & Tunneling**
+  - [X] Vercel edge deployment with client-side SPA route rewrites (`vercel.json`)
+  - [X] Fixed HTTPS subdomain tunneling via Localtunnel (`tendersync-ind-rudyxx007.loca.lt`)
+  - [X] Frontend API client with automated tunnel bypass headers and fallback resilience
+  - [X] Environment isolation and secure Supabase publishable key migration
+  - [ ] Performance optimization & Lighthouse performance/accessibility audit
+  - [ ] Production rate limiting & sliding-window request throttling
+  - [ ] End-to-end automated browser test suite (Playwright)
 
 #### Recommended Additions (Categorized Breakdown)
 
@@ -641,7 +648,6 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
 | :------ | :-------------------- | :----: |
 | **Multi-Agent Validation** | Critic agent cross-verifying extracted JSON against raw tender text to eliminate hallucinations | Planned |
 | **Compliance Matrix Export** | One-click CSV/PDF mapping RFP requirements directly to company qualification evidence | Planned |
-| **Team / Org Accounts** | Multi-user collaboration under one organization with RBAC and shared tender workspaces | Complete |
 | **Win/Loss Feedback Loop** | Outcome tracking to dynamically calibrate PWin weights and scoring heuristics over time | Planned |
 | **Email Deadline Reminders** | Automated cron/scheduler notifications for approaching RFP submission deadlines | Planned |
 | **Audit Log System** | Enterprise-grade activity timeline tracking who uploaded, analyzed, or edited dossiers | Planned |
@@ -655,7 +661,6 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
 | Feature | Description / Benefit | Status |
 | :------ | :-------------------- | :----: |
 | **PDF Highlight Citations** | Visual grounding showing the exact bounding boxes and chunk sources for extracted data | Planned |
-| **Side-by-Side Comparison** | Multi-tender differential analysis with comparative LLM risk/feasibility breakdown | Complete |
 | **Saved Filters & Views** | Quick-filter presets (e.g., *"Only show BID decisions with PWin > 80%"*) | Planned |
 | **Webhooks & CRM Integration** | Bid sync and pipeline integration with Salesforce, HubSpot, and Slack | Planned |
 
@@ -667,7 +672,7 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
 
 | Feature | Description / Benefit | Status |
 | :------ | :-------------------- | :----: |
-| **Cloudflare Tunnel** | Secure tunnel connecting local GPU FastAPI workers directly to the public Vercel frontend | Planned |
+| **Cloud GPU Migration** | Dedicated GPU server (RunPod / Lambda Labs) for sub-10 second 200+ page OCR & Docling parsing | Planned |
 | **Docker Compose Deployment** | Multi-container setup for one-command deployment across local and staging environments | Planned |
 | **Rate Limiting & Quotas** | Per-user and per-organization upload quotas and sliding-window rate limiters | Planned |
 | **Background Task Workers** | Distributed job queues (Celery/Redis) for instant asynchronous processing of 100+ page RFPs | Planned |
