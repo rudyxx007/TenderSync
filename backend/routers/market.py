@@ -18,7 +18,7 @@ def trigger_sync_tenders(authorization: str = Depends(get_token)):
 
 @router.get("/api/market-tenders")
 def list_market_tenders(
-    limit: int = 50,
+    limit: int = 100,
     offset: int = 0,
     org_info: dict = Depends(db.get_current_user_org),
 ):

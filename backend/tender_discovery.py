@@ -144,12 +144,12 @@ def scrape_tenders(base_url: str, max_pages: int = 5) -> List[Dict[str, Any]]:
     return tenders
 
 
-def sync_market_tenders(supabase_client):
-    """Fetches tenders from Central and State portals and upserts to DB."""
-    print("Starting market tender sync...")
+def sync_market_tenders(supabase_client, max_pages: int = 50):
+    """Fetches tenders from Central and State portals (up to ~500 each) and upserts to DB."""
+    print(f"Starting market tender sync (pages: {max_pages} each)...")
     
-    central_tenders = scrape_tenders(CPPP_CENTRAL_URL, max_pages=5)
-    state_tenders = scrape_tenders(CPPP_STATE_URL, max_pages=5)
+    central_tenders = scrape_tenders(CPPP_CENTRAL_URL, max_pages=max_pages)
+    state_tenders = scrape_tenders(CPPP_STATE_URL, max_pages=max_pages)
     
     all_tenders = central_tenders + state_tenders
     
