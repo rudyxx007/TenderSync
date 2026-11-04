@@ -690,23 +690,45 @@ class RAGASPipelineEvaluator:
 
 
 def load_golden_dataset(path: str) -> List[EvaluationSample]:
-    """Load golden dataset from JSON file."""
+    """Load golden dataset from JSON file.
+    
+    Supports multiple JSON formats:
+    - List at top level: [{"id": ..., "query": ...}]
+    - Object with 'samples' key: {"samples": [...], "description": ...}
+    """
     with open(path, 'r') as f:
         data = json.load(f)
     
+    # Handle different JSON formats
+    if isinstance(data, dict):
+        # Look for samples list in common locations
+        if "samples" in data:
+            data = data["samples"]
+        elif "data" in data:
+            data = data["data"]
+        else:
+            # Single sample as dict
+            data = [data]
+    
+    if not isinstance(data, list):
+        raise ValueError(f"Expected list or dict with samples key, got {type(data)}")
+    
     samples = []
     for item in data:
+        if not isinstance(item, dict):
+            continue
+            
         samples.append(EvaluationSample(
-            id=item["id"],
-            query=item["query"],
-            ground_truth=item["ground_truth"],
-            relevant_chunks=item.get("relevant_chunks", []),
+            id=item.get("id", item.get("_id", f"sample_{len(samples)}")),
+            query=item.get("query", item.get("question", "")),
+            ground_truth=item.get("ground_truth", item.get("answer", item.get("expected_answer", ""))),
+            relevant_chunks=item.get("relevant_chunks", item.get("contexts", item.get("retrieved_documents", []))),
             expected_compliance_score=item.get("expected_compliance_score"),
             expected_budget=item.get("expected_budget"),
             expected_deadline=item.get("expected_deadline"),
             expected_tender_id=item.get("expected_tender_id"),
-            category=item.get("category", "general"),
-            difficulty=item.get("difficulty", "medium"),
+            category=item.get("category", item.get("category_name", "general")),
+            difficulty=item.get("difficulty", item.get("difficulty_level", "medium")),
             metadata=item.get("metadata", {}),
         ))
     
