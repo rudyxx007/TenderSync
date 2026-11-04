@@ -14,12 +14,29 @@ Usage:
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
 
 # Ensure backend is in path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# Load environment from .env file
+try:
+    from dotenv import load_dotenv
+    # Load .env from the backend directory
+    backend_dir = Path(__file__).resolve().parent.parent
+    load_dotenv(dotenv_path=backend_dir / '.env')
+except ImportError:
+    pass  # dotenv not installed, environment must be set externally
+
+# Verify required env vars
+REQUIRED_VARS = ['VOYAGE_API_KEY']
+missing = [v for v in REQUIRED_VARS if not os.getenv(v)]
+if missing:
+    print(f"ERROR: Missing required environment variables: {missing}")
+    sys.exit(1)
 
 from evaluation.ragas_evaluator import (
     RAGASEvaluator,
@@ -202,7 +219,7 @@ def main():
             if metric_name in result.metrics:
                 actual = result.metrics[metric_name].get("mean", 0)
                 min_threshold = threshold_data.get("min", 0)
-                status = "✓" if actual >= min_threshold else "✗"
+                status = "PASS" if actual >= min_threshold else "FAIL"
                 if actual < min_threshold:
                     all_passed = False
                 print(f"  {status} {metric_name}: {actual:.2%} (min: {min_threshold:.0%})")

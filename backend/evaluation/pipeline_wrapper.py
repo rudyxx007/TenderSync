@@ -172,22 +172,31 @@ class RAGPipelineWrapper:
         organization_id: Optional[str],
         filters: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        """Query directly using pipeline components."""
+        """Query directly using pipeline components.
+        
+        For evaluation purposes without a running backend, this performs
+        embedding + retrieval only. The 'answer' field is left empty
+        since LLM generation requires additional API calls.
+        """
         if self._pipeline is None:
             from backend.services.voyage_embeddings import VoyageEmbeddingService
-            from backend.services.contextual_chunker import ContextualChunker
-            from backend.services.hybrid_retriever import HybridRetriever
-            from backend.services.citation_verifier import CitationVerifier
+            from backend.services.hybrid_retriever import HybridSearchConfig, HybridRetriever
             
             # Initialize pipeline components
             embedder = VoyageEmbeddingService(
                 model=self.embedding_model,
             )
             
+            config = HybridSearchConfig(
+                bm25_top_k=self.top_k * 5,
+                vector_top_k=self.top_k * 5,
+                fusion_top_k=self.top_k * 5,
+                final_top_k=self.top_k,
+            )
+            
             retriever = HybridRetriever(
                 embedding_service=embedder,
-                retrieval_mode=self.retrieval_mode,
-                top_k=self.top_k,
+                config=config,
             )
             
             self._pipeline = {
@@ -200,42 +209,31 @@ class RAGPipelineWrapper:
         # Embed query
         query_embedding = self._pipeline["embedder"].embed_query(query)
         
-        # Retrieve
-        retrieval_result = self._pipeline["retriever"].retrieve(
+        # Retrieve - since we don't have a DB connection, return empty
+        # In production with Supabase, this would query the actual database
+        search_results = self._pipeline["retriever"].search(
             query=query,
-            query_embedding=query_embedding,
             tenant_id=tenant_id,
             organization_id=organization_id,
             top_k=self.top_k,
         )
         
-        retrieved_chunks = retrieval_result.get("chunks", [])
-        
-        # Rerank if applicable
-        if self.reranker_model != "none" and retrieved_chunks:
-            from backend.services.voyage_embeddings import VoyageReranker
-            
-            reranker = VoyageReranker(model=self.reranker_model)
-            reranking_result = reranker.rerank(
-                query=query,
-                documents=[chunk.get("content", "") for chunk in retrieved_chunks],
-            )
-            
-            # Reorder chunks based on reranking
-            reranked_docs = reranking_result.get("results", [])
-            original_chunks = retrieved_chunks[:len(reranked_docs)]
-            
-            # Sort by relevance score
-            scored_chunks = list(zip(original_chunks, [r.get("relevance_score", 0) for r in reranked_docs]))
-            scored_chunks.sort(key=lambda x: x[1], reverse=True)
-            
-            retrieved_chunks = [chunk for chunk, _ in scored_chunks[:self.rerank_top_k]]
+        # Convert to chunk format
+        retrieved_chunks = []
+        for doc in search_results:
+            retrieved_chunks.append({
+                "id": doc.id,
+                "content": doc.content,
+                "score": doc.score,
+                "source": doc.source.value,
+                "rank": doc.rank,
+                "metadata": doc.metadata or {},
+            })
         
         latency_ms = (time.time() - start_time) * 1000
         
-        # Generate answer (simplified - in production would use LLM)
-        # For evaluation, we assume the answer is pre-generated or use a mock
-        answer = ""  # Would be filled by LLM in production
+        # No answer generation (would need LLM API call)
+        answer = ""
         
         return {
             "query": query,

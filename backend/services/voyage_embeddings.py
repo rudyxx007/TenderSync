@@ -13,6 +13,7 @@ References:
 """
 
 import os
+import time
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
@@ -182,6 +183,16 @@ class VoyageEmbeddingService:
             return all_embeddings
         
         try:
+            # Rate limiting for free tier (3 RPM without payment method)
+            # 3 RPM = 1 request per 20 seconds minimum
+            min_interval = 21.0  # 21 seconds between requests to be safe
+            if hasattr(self, '_last_embed_time'):
+                elapsed = time.time() - self._last_embed_time
+                if elapsed < min_interval:
+                    remaining = min_interval - elapsed
+                    print(f"  [Rate limit] Waiting {remaining:.1f}s before next embedding request...")
+                    time.sleep(remaining)
+            
             result = self.client.embed(
                 texts=texts,
                 model=model,
@@ -190,8 +201,10 @@ class VoyageEmbeddingService:
                 output_dimension=output_dimension,
                 output_dtype=output_dtype,
             )
+            self._last_embed_time = time.time()
             return result.embeddings
         except Exception as e:
+            self._last_embed_time = time.time()
             raise RuntimeError(f"Voyage AI embedding failed: {e}") from e
     
     def embed_documents(self, texts: List[str]) -> List[List[float]]:

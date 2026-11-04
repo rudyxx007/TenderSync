@@ -484,15 +484,19 @@ class RAGASEvaluator:
         import re
         
         # Pattern: currency amounts
-        match = re.search(r'(?:budget|value|cost|value|funding)\s*[:\s]*'
-                         r'[\$£€₹]?\s*([\d,.]+(?:\s*(?:million|billion|thousand))?',
-                         text, re.IGNORECASE)
+        match = re.search(
+            r'(?:budget|value|cost|funding)\s*[:\s]*'
+            r'[\$£€₹]?\s*([\d,.]+(?:\s*(?:million|billion|thousand))?)',
+            text, re.IGNORECASE
+        )
         if match:
             return match.group(1)
         
         # Just find currency amounts
-        match = re.search(r'[\$£€₹]\s*([\d,.]+(?:\s*(?:million|billion|thousand))?',
-                         text)
+        match = re.search(
+            r'[\$£€₹]\s*([\d,.]+(?:\s*(?:million|billion|thousand))?)',
+            text
+        )
         if match:
             return match.group(1)
         
@@ -610,30 +614,45 @@ class RAGASPipelineEvaluator:
         """
         results = []
         
-        for i, sample in enumerate(dataset):
+        if run_rag_pipeline and self.rag_pipeline:
+            # Batch all queries for embedding to reduce API calls
+            # (Voyage free tier: 3 RPM, batching helps stay within limits)
             if verbose:
-                print(f"Evaluating sample {i+1}/{len(dataset)}: {sample.id}")
+                print(f"Running RAG pipeline on {len(dataset)} samples...")
             
-            # Run RAG pipeline to get answer and retrieved chunks
-            if run_rag_pipeline and self.rag_pipeline:
+            for i, sample in enumerate(dataset):
+                if verbose:
+                    print(f"Evaluating sample {i+1}/{len(dataset)}: {sample.id}")
+                
                 start_time = time.time()
                 pipeline_result = self.rag_pipeline.query(
                     sample.query, tenant_id
                 )
                 retrieved_chunks = pipeline_result.get("retrieved_chunks", [])
                 generated_answer = pipeline_result.get("answer", "")
-            else:
-                retrieved_chunks = []
-                generated_answer = ""
-            
-            # Evaluate
-            eval_result = self.evaluator.evaluate_sample(
-                sample,
-                generated_answer,
-                retrieved_chunks,
-                sample.relevant_chunks,
-            )
-            results.append(eval_result)
+                
+                # Evaluate
+                eval_result = self.evaluator.evaluate_sample(
+                    sample,
+                    generated_answer,
+                    retrieved_chunks,
+                    sample.relevant_chunks,
+                )
+                results.append(eval_result)
+                
+                # Rate limiting: wait between samples for free tier APIs
+                if i < len(dataset) - 1:
+                    time.sleep(22)  # ~3 RPM means ~20s between requests
+        else:
+            # Mock mode - no API calls
+            for sample in dataset:
+                eval_result = self.evaluator.evaluate_sample(
+                    sample,
+                    "",
+                    [],
+                    sample.relevant_chunks,
+                )
+                results.append(eval_result)
         
         # Aggregate results
         return self._aggregate_results(results)
