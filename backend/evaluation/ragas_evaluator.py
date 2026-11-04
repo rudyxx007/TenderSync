@@ -292,15 +292,37 @@ class RAGASEvaluator:
         
         # Fallback: simple heuristic
         # Check if answer contains only information from chunks
-        chunk_text = " ".join([c.get("content", "") for c in retrieved_chunks])
+        chunk_text = " ".join([c.get("content", "") for c in retrieved_chunks]).lower()
         
         # Extract sentences from answer
         sentences = self._extract_sentences(answer)
         
+        if not sentences:
+            return 0.0
+        
         supported_count = 0
         for sentence in sentences:
-            if sentence in chunk_text or self._is_supported_by_context(sentence, chunk_text):
+            sentence_lower = sentence.lower()
+            if sentence_lower in chunk_text:
                 supported_count += 1
+            else:
+                # Check if key facts from sentence are in context
+                # Extract numbers and key entities
+                import re
+                numbers_in_sentence = re.findall(r'\d+[\d,.]*\s*(?:million|billion|thousand)?', sentence_lower)
+                numbers_in_chunk = re.findall(r'\d+[\d,.]*\s*(?:million|billion|thousand)?', chunk_text)
+                
+                # Check if sentence numbers match chunk numbers
+                sentence_nums = set(n.strip() for n in numbers_in_sentence)
+                chunk_nums = set(n.strip() for n in numbers_in_chunk)
+                
+                if sentence_nums and not sentence_nums.issubset(chunk_nums):
+                    # Numbers don't match - not supported
+                    continue
+                
+                # Word overlap check
+                if self._is_supported_by_context(sentence, chunk_text):
+                    supported_count += 1
         
         return supported_count / len(sentences) if sentences else 0.0
     
