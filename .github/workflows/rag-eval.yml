@@ -1,0 +1,388 @@
+name: RAG Evaluation Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - feature/enterprise-hybrid-rag-platform
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      eval_subset:
+        description: 'Number of samples to evaluate (0=all)'
+        required: false
+        default: '0'
+      run_ablation:
+        description: 'Run ablation study'
+        required: false
+        default: 'false'
+      model_variant:
+        description: 'Embedding model variant'
+        required: false
+        default: 'voyage-4-large'
+
+env:
+  PYTHON_VERSION: '3.11'
+  VIRTUAL_ENV: '.venv'
+  POETRY_VERSION: '1.8.0'
+
+jobs:
+  # -------------------------------------------------------------------
+  # Evaluate RAG Pipeline
+  # -------------------------------------------------------------------
+  evaluate-rag:
+    name: Evaluate RAG Pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements*.txt'
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          if [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt
+          fi
+
+      - name: Install evaluation dependencies
+        working-directory: backend
+        run: |
+          pip install ragas trulens langchain langchain-community numpy pydantic
+
+      - name: Configure environment
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> $GITHUB_ENV
+          echo "SUPABASE_SECRET_KEY=${{ secrets.SUPABASE_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "VOYAGE_API_KEY=${{ secrets.VOYAGE_API_KEY }}" >> $GITHUB_ENV
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" >> $GITHUB_ENV
+          echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> $GITHUB_ENV
+
+      - name: Run RAG evaluation
+        working-directory: backend
+        run: |
+          python -m evaluation.run_evaluation \
+            --dataset evaluation/golden_dataset.json \
+            --output evaluation/results/eval_report.json \
+            --tenant-id test-tenant \
+            --samples ${{ github.event.inputs.eval_subset || '0' }} \
+            --verbose
+
+      - name: Upload evaluation results
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-evaluation-results
+          path: backend/evaluation/results/
+          retention-days: 30
+
+      - name: Check evaluation metrics
+        working-directory: backend
+        run: |
+          python -m evaluation.check_thresholds \
+            --report evaluation/results/eval_report.json \
+            --thresholds evaluation/config/metrics_thresholds.json
+
+  # -------------------------------------------------------------------
+  # Ablation Study
+  # -------------------------------------------------------------------
+  ablation-study:
+    name: Ablation Study
+    runs-on: ubuntu-latest
+    needs: evaluate-rag
+    if: github.event.inputs.run_ablation == 'true'
+
+    strategy:
+      matrix:
+        config:
+          - { embedding: 'voyage-4-large', reranker: 'voyage-rerank-2', retrieval: 'hybrid' }
+          - { embedding: 'voyage-4-large', reranker: 'none', retrieval: 'hybrid' }
+          - { embedding: 'voyage-4-large', reranker: 'bge-reranker-v2-m3', retrieval: 'hybrid' }
+          - { embedding: 'voyage-finance-2', reranker: 'voyage-rerank-2', retrieval: 'hybrid' }
+          - { embedding: 'voyage-law-2', reranker: 'voyage-rerank-2', retrieval: 'hybrid' }
+          - { embedding: 'voyage-4-large', reranker: 'voyage-rerank-2', retrieval: 'bm25_only' }
+          - { embedding: 'voyage-4-large', reranker: 'voyage-rerank-2', retrieval: 'vector_only' }
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          pip install ragas numpy
+
+      - name: Run ablation study
+        working-directory: backend
+        env:
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+          EMBEDDING_MODEL: ${{ matrix.config.embedding }}
+          RERANKER_MODEL: ${{ matrix.config.reranker }}
+          RETRIEVAL_MODE: ${{ matrix.config.retrieval }}
+        run: |
+          python -m evaluation.run_ablation \
+            --dataset evaluation/golden_dataset.json \
+            --output evaluation/results/ablation_${{ matrix.config.embedding }}_${{ matrix.config.reranker }}_${{ matrix.config.retrieval }}.json \
+            --samples 50
+
+      - name: Upload ablation results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ablation-results
+          path: backend/evaluation/results/ablation_*.json
+          retention-days: 30
+
+  # -------------------------------------------------------------------
+  # Benchmark on Standard Datasets
+  # -------------------------------------------------------------------
+  benchmark-datasets:
+    name: Benchmark on Standard Datasets
+    runs-on: ubuntu-latest
+    needs: evaluate-rag
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          pip install ragas datasets evaluate numpy
+
+      - name: Download FinanceBench subset
+        working-directory: backend
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python -m evaluation.download_benchmarks \
+            --dataset financebench \
+            --output data/benchmarks/financebench \
+            --samples 20
+
+      - name: Download CUAD subset
+        working-directory: backend
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python -m evaluation.download_benchmarks \
+            --dataset cuad \
+            --output data/benchmarks/cuad \
+            --samples 20
+
+      - name: Benchmark FinanceBench
+        working-directory: backend
+        env:
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          python -m evaluation.run_benchmark \
+            --dataset data/benchmarks/financebench \
+            --output evaluation/results/financebench_benchmark.json \
+            --metrics context_recall context_precision faithfulness answer_relevance
+
+      - name: Benchmark CUAD
+        working-directory: backend
+        env:
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          python -m evaluation.run_benchmark \
+            --dataset data/benchmarks/cuad \
+            --output evaluation/results/cuad_benchmark.json \
+            --metrics context_recall context_precision faithfulness
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: backend/evaluation/results/*_benchmark.json
+          retention-days: 30
+
+  # -------------------------------------------------------------------
+  # Generate Evaluation Report
+  # -------------------------------------------------------------------
+  generate-report:
+    name: Generate Evaluation Report
+    runs-on: ubuntu-latest
+    needs: [evaluate-rag, ablation-study, benchmark-datasets]
+    if: always()
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: backend/evaluation/results/
+
+      - name: Generate combined report
+        working-directory: backend
+        run: |
+          python -m evaluation.generate_report \
+            --input-dir evaluation/results/ \
+            --output evaluation/reports/evaluation_report_${{ github.run_id }}.md \
+            --format markdown
+
+      - name: Publish report to GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: backend/evaluation/reports/
+          keep_files: true
+          destination_dir: evaluation-reports
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = 'backend/evaluation/reports/evaluation_report_${{ github.run_id }}.md';
+            if (fs.existsSync(reportPath)) {
+              const report = fs.readFileSync(reportPath, 'utf8');
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## RAG Evaluation Report\n\n${report.substring(0, 5000)}...\n\n[Full Report](https://${context.repo.owner}.github.io/${context.repo.repo}/evaluation-reports/evaluation_report_${{ github.run_id }}.md)`
+              });
+            }
+
+  # -------------------------------------------------------------------
+  # Upload to Weights & Biases / Experiment Tracking
+  # -------------------------------------------------------------------
+  track-experiment:
+    name: Track Experiment
+    runs-on: ubuntu-latest
+    needs: evaluate-rag
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Download evaluation results
+        uses: actions/download-artifact@v4
+        with:
+          name: rag-evaluation-results
+          path: backend/evaluation/results/
+
+      - name: Track with W&B
+        working-directory: backend
+        env:
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+          WANDB_PROJECT: tender-sync-rag-eval
+          WANDB_RUN_NAME: eval-${{ github.run_id }}
+        run: |
+          python -m evaluation.track_experiment \
+            --results evaluation/results/eval_report.json \
+            --commit ${{ github.sha }}
+
+  # -------------------------------------------------------------------
+  # Performance Benchmarks
+  # -------------------------------------------------------------------
+  perf-benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          pip install pyperf psutil
+
+      - name: Run performance benchmarks
+        working-directory: backend
+        env:
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+        run: |
+          python -m evaluation.run_perf_benchmark \
+            --output evaluation/results/perf_benchmark.json \
+            --iterations 100
+
+      - name: Upload perf results
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-benchmark-results
+          path: backend/evaluation/results/perf_benchmark.json
+          retention-days: 30
+
+  # -------------------------------------------------------------------
+  # Notification (Slack / Email)
+  # -------------------------------------------------------------------
+  notify:
+    name: Send Notification
+    runs-on: ubuntu-latest
+    needs: [evaluate-rag, generate-report]
+    if: always() && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Check evaluation status
+        id: check
+        run: |
+          if [ -f backend/evaluation/results/eval_report.json ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "TenderSync RAG Evaluation ${{ steps.check.outputs.status == 'success' && 'PASSED' || 'FAILED' }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": { "type": "plain_text", "text": "🤖 TenderSync RAG Evaluation" }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    { "type": "mrkdwn", "text": "*Status:* ${{ steps.check.outputs.status == 'success' && '✅ PASSED' || '❌ FAILED' }}" },
+                    { "type": "mrkdwn", "text": "*Run:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.run_id }}>" },
+                    { "type": "mrkdwn", "text": "*Branch:* ${{ github.ref_name }}" },
+                    { "type": "mrkdwn", "text": "*Commit:* ${{ github.sha }}" }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

@@ -1,0 +1,74 @@
+{
+  "description": "Minimum acceptable thresholds for RAG evaluation metrics",
+  "version": "1.0",
+  "failure_action": "comment_on_pr",
+  "thresholds": {
+    "context_recall": {
+      "min": 0.80,
+      "target": 0.90,
+      "weight": 0.20,
+      "description": "Percentage of relevant context retrieved"
+    },
+    "context_precision": {
+      "min": 0.70,
+      "target": 0.85,
+      "weight": 0.20,
+      "description": "Quality of retrieved context ranking"
+    },
+    "faithfulness": {
+      "min": 0.85,
+      "target": 0.95,
+      "weight": 0.25,
+      "description": "How factually accurate the answer is (no hallucination)"
+    },
+    "answer_relevance": {
+      "min": 0.75,
+      "target": 0.90,
+      "weight": 0.20,
+      "description": "How relevant the answer is to the query"
+    },
+    "answer_similarity": {
+      "min": 0.70,
+      "target": 0.85,
+      "weight": 0.15,
+      "description": "Similarity to ground truth answer"
+    },
+    "ndcg": {
+      "min": 0.75,
+      "target": 0.90,
+      "weight": 0.15,
+      "description": "Normalized Discounted Cumulative Gain"
+    },
+    "compliance_score_accuracy": {
+      "min": 0.80,
+      "target": 0.95,
+      "weight": 0.10,
+      "description": "Accuracy of compliance score extraction"
+    },
+    "citation_verification_rate": {
+      "min": 0.90,
+      "target": 0.98,
+      "weight": 0.15,
+      "description": "Rate of verified citations"
+    }
+  },
+  "category_thresholds": {
+    "compliance": {
+      "context_recall": 0.90,
+      "faithfulness": 0.95
+    },
+    "budget": {
+      "context_recall": 0.85,
+      "answer_relevance": 0.85
+    },
+    "deadline": {
+      "context_recall": 0.90,
+      "accenture": 0.95
+    }
+  },
+  "ablation_comparison": {
+    "enabled": true,
+    "min_improvement": 0.05,
+    "significant_metrics": ["context_recall", "faithfulness", "ndcg"]
+  }
+}
