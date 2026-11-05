@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import List, Dict, Any
+from unittest.mock import patch
 
 # Ensure backend is in path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -434,11 +435,18 @@ class TestPipelineWrapper(unittest.TestCase):
         self.assertEqual(wrapper.top_k, 20)
     
     def test_wrapper_health_check_no_api(self):
-        """Health check should return True in direct mode."""
+        """Direct mode must report unhealthy when credentials are missing.
+
+        The old test asserted True here, which matched a stub that then
+        produced all-zero metrics. A missing Supabase/Groq configuration is a
+        configuration failure, not a healthy pipeline.
+        """
         wrapper = RAGPipelineWrapper(api_base=None)
-        
-        # In direct mode (no API), health check returns True
-        self.assertTrue(wrapper.health_check())
+        with patch.dict(
+            os.environ,
+            {"SUPABASE_URL": "", "SUPABASE_SECRET_KEY": "", "SUPABASE_SERVICE_KEY": ""},
+        ):
+            self.assertFalse(wrapper.health_check())
 
 
 class TestSimilarityFunctions(unittest.TestCase):

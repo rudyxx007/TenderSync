@@ -183,10 +183,11 @@ class VoyageEmbeddingService:
             return all_embeddings
         
         try:
-            # Rate limiting for free tier (3 RPM without payment method)
-            # 3 RPM = 1 request per 20 seconds minimum
-            min_interval = 21.0  # 21 seconds between requests to be safe
-            if hasattr(self, '_last_embed_time'):
+            # Only throttle when the free tier is explicitly configured. The
+            # previous unconditional 21s sleep made a 100-sample evaluation
+            # take 35 minutes even on paid keys.
+            min_interval = float(os.environ.get("VOYAGE_MIN_INTERVAL_SECONDS", "0"))
+            if min_interval > 0 and hasattr(self, '_last_embed_time'):
                 elapsed = time.time() - self._last_embed_time
                 if elapsed < min_interval:
                     remaining = min_interval - elapsed
@@ -352,16 +353,17 @@ class VoyageReranker:
                 documents=documents,
                 model=self.model,
                 top_k=top_k,
-                max_chunks_per_doc=max_chunks_per_doc,
             )
             
+            # result.results[i].index refers to the original document index;
+            # zipping the original list with the reranked list mismatched texts.
             return [
                 {
-                    "document": doc,
-                    "relevance_score": rerank.score,
-                    "index": rerank.index,
+                    "document": documents[item.index],
+                    "relevance_score": item.relevance_score,
+                    "index": item.index,
                 }
-                for doc, rerank in zip(documents, result.results)
+                for item in result.results
             ]
         except Exception as e:
             raise RuntimeError(f"Voyage AI reranking failed: {e}") from e

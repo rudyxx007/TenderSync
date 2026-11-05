@@ -15,6 +15,18 @@ os.environ["HF_TOKEN"] = "fake-hf-token"
 os.environ["GROQ_API_KEY"] = "fake-groq-key"
 os.environ["ALLOW_DEV_BYPASS"] = "false"
 
+class _FakeEmbedder:
+    """Deterministic 1024-dim vectors so tests never call a paid API."""
+
+    dimension = 1024
+
+    def embed_documents(self, texts):
+        return [[0.01 + (i % 10) / 100] * 1024 for i, _ in enumerate(texts)]
+
+    def embed_query(self, text):
+        return [0.02] * 1024
+
+
 @pytest.fixture(autouse=True)
 def mock_external_services(monkeypatch):
     """Mock all external API clients so no real network calls are made."""
@@ -24,6 +36,8 @@ def mock_external_services(monkeypatch):
     
     monkeypatch.setattr("main.generate_embeddings", lambda texts, task_type="passage": [[0.1] * 1024 for _ in texts])
     monkeypatch.setattr("embedding_service.generate_embeddings", lambda texts, task_type="passage": [[0.1] * 1024 for _ in texts])
+    monkeypatch.setattr("rag_service.build_embedder", lambda *args, **kwargs: _FakeEmbedder())
+    monkeypatch.setattr("rag_service.build_reranker", lambda *args, **kwargs: None)
     
     mock_groq = MagicMock()
     mock_choice = MagicMock()

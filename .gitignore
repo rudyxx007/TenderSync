@@ -130,6 +130,14 @@ temp/
 *.sqlite
 *.sqlite3
 
+# RAG benchmark raw downloads and generated evaluation artifacts
+backend/data/benchmarks/
+backend/evaluation/results/
+backend/evaluation/seeded/
+backend/evaluation/artifacts/
+backend/evaluation/golden_dataset_seeded.json
+backend/.venv-ci/
+
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/
 

@@ -1,238 +1,286 @@
 #!/usr/bin/env python3
-"""
-RAG Evaluation Runner - Entry point for CLI evaluation execution.
+"""Run the TenderSync RAG evaluation harness.
 
-Usage:
+Examples
+--------
+One benchmark at a time, real pipeline:
+
     python -m evaluation.run_evaluation \
-        --dataset evaluation/golden_dataset.json \
-        --output evaluation/results/eval_report.json \
-        --tenant-id test-tenant \
-        --samples 100 \
+        --benchmark financebench \
+        --dataset evaluation/datasets/financebench.json \
+        --output evaluation/results/financebench/eval_report.json \
+        --tenant-id <org-uuid> \
         --verbose
+
+A mixed-source dataset is rejected; FinanceBench and CUAD are never scored
+in the same run.
+
+CI release gate:
+
+    python -m evaluation.run_evaluation ... --fail-on-thresholds
+
+Before evaluating a benchmark dataset, seed its source documents into the
+tenant with ``python -m evaluation.ingest_golden`` so retrieval has something
+to search. Evaluating against an empty tenant is what produced the previous
+all-zero report; this runner now says so explicitly.
 """
 
 import argparse
 import json
 import logging
 import os
+import random
 import sys
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
-# Ensure backend is in path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BACKEND_DIR))
 
-# Load environment from .env file
 try:
     from dotenv import load_dotenv
-    # Load .env from the backend directory
-    backend_dir = Path(__file__).resolve().parent.parent
-    load_dotenv(dotenv_path=backend_dir / '.env')
+
+    load_dotenv(dotenv_path=BACKEND_DIR / ".env")
 except ImportError:
-    pass  # dotenv not installed, environment must be set externally
+    pass
 
-# Verify required env vars
-REQUIRED_VARS = ['VOYAGE_API_KEY']
-missing = [v for v in REQUIRED_VARS if not os.getenv(v)]
-if missing:
-    print(f"ERROR: Missing required environment variables: {missing}")
-    sys.exit(1)
-
+import rag_service
+from evaluation.check_thresholds import check_thresholds, load_thresholds
+from evaluation.pipeline_wrapper import PipelineConfigurationError, RAGPipelineWrapper
 from evaluation.ragas_evaluator import (
     RAGASEvaluator,
     RAGASPipelineEvaluator,
     load_golden_dataset,
-    EvaluationSample,
 )
-from evaluation.pipeline_wrapper import RAGPipelineWrapper
-
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("evaluation")
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description='Run RAG evaluation on golden dataset'
-    )
+    parser = argparse.ArgumentParser(description="Evaluate the TenderSync RAG pipeline")
     parser.add_argument(
-        '--dataset', '-d',
-        type=str,
+        "--benchmark",
         required=True,
-        help='Path to golden dataset JSON file'
+        choices=["financebench", "cuad", "austender"],
+        help="Benchmark to evaluate; exactly one source per run",
     )
     parser.add_argument(
-        '--output', '-o',
-        type=str,
-        required=True,
-        help='Path for output evaluation report'
-    )
-    parser.add_argument(
-        '--tenant-id', '-t',
-        type=str,
-        required=True,
-        help='Tenant ID for retrieval context'
-    )
-    parser.add_argument(
-        '--samples', '-n',
-        type=int,
-        default=0,
-        help='Number of samples to evaluate (0=all)'
-    )
-    parser.add_argument(
-        '--category',
-        type=str,
+        "--dataset",
+        "-d",
         default=None,
-        help='Filter by category (compliance, budget, deadline, general)'
+        help="Benchmark dataset (defaults to evaluation/datasets/<benchmark>.json)",
     )
     parser.add_argument(
-        '--difficulty',
-        type=str,
+        "--output",
+        "-o",
         default=None,
-        help='Filter by difficulty (easy, medium, hard)'
+        help="Report path (defaults to evaluation/results/<benchmark>/eval_report.json)",
     )
+    parser.add_argument("--tenant-id", "-t", required=True, help="Organisation UUID to evaluate")
     parser.add_argument(
-        '--model',
-        type=str,
-        default='voyage-4-large',
-        help='Embedding model to use'
+        "--samples", "-n", type=int, default=0, help="Number of samples (0 = the entire dataset)"
     )
+    parser.add_argument("--category", default=None)
+    parser.add_argument("--difficulty", default=None)
+    parser.add_argument("--embedding-model", default=os.getenv("EMBEDDING_MODEL", "voyage-4-large"))
+    parser.add_argument("--reranker", default=os.getenv("RERANKER_MODEL", "voyage-rerank-2"))
     parser.add_argument(
-        '--reranker',
-        type=str,
-        default='voyage-rerank-2',
-        help='Reranker model to use'
+        "--retrieval-mode",
+        default="hybrid",
+        choices=["hybrid", "bm25_only", "vector_only"],
     )
+    parser.add_argument("--api-base", default=None, help="Evaluate a running FastAPI service")
+    parser.add_argument("--document-id", default=None, help="Force retrieval to one document")
+    parser.add_argument("--top-k", type=int, default=8)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
-        '--retrieval-mode',
-        type=str,
-        default='hybrid',
-        choices=['hybrid', 'bm25_only', 'vector_only'],
-        help='Retrieval mode'
+        "--fail-on-thresholds",
+        action="store_true",
+        help="Exit non-zero when any required metric misses its minimum (use in CI)",
     )
-    parser.add_argument(
-        '--verbose', '-v',
-        action='store_true',
-        help='Verbose output'
-    )
-    parser.add_argument(
-        '--api-base',
-        type=str,
-        default=None,
-        help='Base URL for RAG service API'
-    )
+    parser.add_argument("--verbose", "-v", action="store_true")
     return parser.parse_args()
 
 
-def main():
+def _dataset_metadata(path: Path) -> Dict[str, Any]:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if isinstance(payload, dict):
+            return {
+                key: payload[key]
+                for key in ("description", "version", "source_datasets", "licences", "generated")
+                if key in payload
+            }
+    except Exception:
+        pass
+    return {}
+
+
+def main() -> int:
     args = parse_args()
-    
-    # Validate dataset path
-    dataset_path = Path(args.dataset)
+    dataset_path = (
+        Path(args.dataset)
+        if args.dataset
+        else Path(__file__).parent / "datasets" / f"{args.benchmark}.json"
+    )
     if not dataset_path.exists():
-        logger.error(f"Dataset not found: {args.dataset}")
-        sys.exit(1)
-    
-    # Load dataset
-    logger.info(f"Loading dataset: {args.dataset}")
+        logger.error("Dataset not found: %s", dataset_path)
+        return 2
+
     dataset = load_golden_dataset(str(dataset_path))
-    logger.info(f"Loaded {len(dataset)} samples")
-    
-    # Filter dataset
+    if not dataset:
+        logger.error("Dataset contains no usable samples: %s", dataset_path)
+        return 2
+
+    sources = sorted(
+        {
+            str((sample.metadata or {}).get("source_dataset") or "unknown")
+            for sample in dataset
+        }
+    )
+    if sources != [args.benchmark]:
+        logger.error(
+            "Refusing to evaluate benchmark %r with dataset sources %s. "
+            "Run each benchmark separately with its own single-source dataset.",
+            args.benchmark,
+            sources,
+        )
+        return 2
+
     if args.category:
         dataset = [s for s in dataset if s.category == args.category]
-        logger.info(f"Filtered to {len(dataset)} samples in category '{args.category}'")
-    
     if args.difficulty:
         dataset = [s for s in dataset if s.difficulty == args.difficulty]
-        logger.info(f"Filtered to {len(dataset)} samples with difficulty '{args.difficulty}'")
-    
     if args.samples > 0 and args.samples < len(dataset):
-        import random
-        random.seed(42)
-        dataset = random.sample(dataset, args.samples)
-        logger.info(f"Sampled {len(dataset)} samples for evaluation")
-    
-    # Initialize RAG pipeline wrapper
-    logger.info("Initializing RAG pipeline...")
-    pipeline = RAGPipelineWrapper(
+        random.Random(args.seed).shuffle(dataset)
+        dataset = dataset[: args.samples]
+
+    if args.document_id:
+        for sample in dataset:
+            sample.document_id = args.document_id
+
+    logger.info("Benchmark: %s", args.benchmark)
+    logger.info("Dataset: %s", dataset_path)
+    logger.info("Samples: %d%s", len(dataset), "" if args.samples else " (entire benchmark)")
+    logger.info("Tenant: %s", args.tenant_id)
+    if not all(sample.document_id for sample in dataset):
+        logger.warning(
+            "Some samples have no document_id. Retrieval will search the whole "
+            "tenant, so results may mix documents. Run evaluation.ingest_golden "
+            "to create a seeded dataset."
+        )
+
+    wrapper = RAGPipelineWrapper(
         api_base=args.api_base,
-        embedding_model=args.model,
+        embedding_model=args.embedding_model,
         reranker_model=args.reranker,
         retrieval_mode=args.retrieval_mode,
+        top_k=args.top_k,
+        tenant_id=args.tenant_id,
     )
-    
-    # Initialize evaluator
-    evaluator = RAGASEvaluator()
-    pipeline_evaluator = RAGASPipelineEvaluator(
-        evaluator=evaluator,
-        rag_pipeline=pipeline,
-    )
-    
-    # Run evaluation
-    logger.info(f"Starting evaluation on {len(dataset)} samples...")
+
+    try:
+        embedder = wrapper.embedder
+    except PipelineConfigurationError as exc:
+        logger.error("%s", exc)
+        return 2
+
+    evaluator = RAGASEvaluator(embedding_service=embedder)
+    pipeline_evaluator = RAGASPipelineEvaluator(evaluator=evaluator, rag_pipeline=wrapper)
+
+    logger.info("Starting evaluation...")
+    started = time.monotonic()
     result = pipeline_evaluator.evaluate_dataset(
         dataset=dataset,
         tenant_id=args.tenant_id,
         run_rag_pipeline=True,
         verbose=args.verbose,
     )
-    
-    # Save results
-    output_path = Path(args.output)
+
+    report = {
+        "benchmark": args.benchmark,
+        "dataset": str(dataset_path),
+        "dataset_metadata": _dataset_metadata(dataset_path),
+        "tenant_id": args.tenant_id,
+        "config": {
+            "embedding_model": args.embedding_model,
+            "reranker_model": args.reranker,
+            "retrieval_mode": args.retrieval_mode,
+            "top_k": args.top_k,
+            "samples_requested": args.samples or len(dataset),
+        },
+        "total_samples": result.total_samples,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "errors": result.errors,
+        "metrics": result.metrics,
+        "per_category": result.per_category,
+        "per_difficulty": result.per_difficulty,
+        "samples": result.samples,
+        "timestamp": result.timestamp,
+    }
+
+    output_path = (
+        Path(args.output)
+        if args.output
+        else Path(__file__).parent / "results" / args.benchmark / "eval_report.json"
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    with open(output_path, 'w') as f:
-        json.dump(result.to_dict(), f, indent=2)
-    
-    logger.info(f"Evaluation complete. Results saved to {args.output}")
-    
-    # Print summary
-    print("\n" + "=" * 60)
-    print("EVALUATION SUMMARY")
-    print("=" * 60)
-    print(f"Total samples: {result.total_samples}")
-    print()
-    
-    if result.metrics:
-        print("Metrics:")
-        print("-" * 40)
-        for metric_name, metric_data in result.metrics.items():
-            mean = metric_data.get("mean", 0) * 100
-            print(f"  {metric_name}: {mean:.2f}%")
-    
-    # Check against thresholds
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(report, handle, indent=2)
+
+    print("\n" + "=" * 64)
+    print("RAG EVALUATION SUMMARY")
+    print("=" * 64)
+    print(f"Samples: {result.total_samples}    Errors: {result.errors}    Report: {output_path}")
+    print("-" * 64)
+    for metric_name, values in sorted(result.metrics.items()):
+        print(
+            f"  {metric_name:<30} {values['mean'] * 100:6.2f}%"
+            f"  (min {values['min'] * 100:5.1f}%, max {values['max'] * 100:5.1f}%, n={values['n']})"
+        )
+
+    retrieved_total = sum(
+        sample.get("num_retrieved_chunks", 0) for sample in result.samples
+    )
+    if retrieved_total == 0:
+        print(
+            "\nDIAGNOSTIC: retrieval returned zero chunks for every sample.\n"
+            "The metrics above are not a measurement of RAG quality. Seed the\n"
+            "tenant first:\n"
+            "  python -m evaluation.ingest_golden --dataset <dataset> "
+            f"--tenant-id {args.tenant_id} --user-id <uuid>\n"
+        )
+    elif result.errors:
+        print(f"\nDIAGNOSTIC: {result.errors} sample(s) raised pipeline errors. See the report.")
+
     thresholds_path = Path(__file__).parent / "config" / "metrics_thresholds.json"
     if thresholds_path.exists():
-        print("\n" + "-" * 40)
-        print("Threshold Check:")
-        print("-" * 40)
-        
-        with open(thresholds_path) as f:
-            thresholds = json.load(f)
-        
-        all_passed = True
-        for metric_name, threshold_data in thresholds.get("thresholds", {}).items():
-            if metric_name in result.metrics:
-                actual = result.metrics[metric_name].get("mean", 0)
-                min_threshold = threshold_data.get("min", 0)
-                status = "PASS" if actual >= min_threshold else "FAIL"
-                if actual < min_threshold:
-                    all_passed = False
-                print(f"  {status} {metric_name}: {actual:.2%} (min: {min_threshold:.0%})")
-        
-        if not all_passed:
-            logger.warning("Some metrics below minimum thresholds!")
-            sys.exit(1)
-    
-    print()
-    print("=" * 60)
-    print("Evaluation PASSED")
-    print("=" * 60)
+        check = check_thresholds(report, load_thresholds(str(thresholds_path)))
+        print("-" * 64)
+        print("Release gate")
+        print("-" * 64)
+        for item in check["results"]:
+            actual = "missing" if item["actual"] is None else f"{item['actual']:.2%}"
+            status = "PASS" if item["passed"] else "FAIL"
+            print(f"  {status:<4} {item['metric']:<30} {actual:>9}  (min {item['threshold']:.0%})")
+
+        if not check["passed"]:
+            logger.warning("%d metric(s) below the release threshold", check["failed_metrics"])
+            if args.fail_on_thresholds:
+                wrapper.close()
+                return 1
+        else:
+            print("\nAll gated metrics passed.")
+
+    wrapper.close()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

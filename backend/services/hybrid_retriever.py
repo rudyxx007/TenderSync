@@ -1,40 +1,36 @@
-"""
-Hybrid Retriever for TenderSync Enterprise RAG Pipeline.
+"""Hybrid retrieval for TenderSync.
 
-Combines multiple retrieval methods:
-1. PostgreSQL Full-Text Search (BM25 via tsvector) - Exact keyword matching
-2. pgvector HNSW Cosine Similarity - Semantic similarity
-3. Reciprocal Rank Fusion (RRF) - Fusion of both methods
-4. Cross-Encoder Reranking - Final refinement to top-k results
+Pipeline: PostgreSQL full-text ranking (``ts_rank_cd`` over a GIN tsvector)
++ pgvector HNSW cosine similarity, fused server-side with Reciprocal Rank
+Fusion, then an optional cross-encoder rerank.
 
-This hybrid approach is critical for enterprise documents where:
-- ABN numbers, clause IDs, dollar figures need exact matching (BM25)
-- Conceptual queries need semantic understanding (vectors)
-- Combined approach gives best of both worlds
+Everything is scoped by ``org_id``. When the database does not yet have the
+hybrid function (migration 002 not applied), the retriever falls back to
+org-scoped vector search and logs a warning instead of silently returning
+unranked rows.
 
-References:
-- https://jkatz.github.io/post/postgres/hybrid-search-postgres-pgvector/
-- https://www.anthropic.com/research/contextual-retrieval
+Note on naming: PostgreSQL's ``ts_rank_cd`` is a BM25-like lexical rank, not a
+literal BM25 implementation. It is exposed as ``text_rank``; the legacy
+``bm25_score`` field is kept for API compatibility.
 """
 
-import math
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
+logger = logging.getLogger(__name__)
+
 
 class FusionMethod(Enum):
-    """Methods for fusing multiple retrieval results."""
-    RRF = "rrf"  # Reciprocal Rank Fusion
+    RRF = "rrf"
     WEIGHTED_SUM = "weighted_sum"
     MAX_SCORE = "max_score"
-    DISCOUNTED_UNION = "discounted_union"
 
 
 class RetrievalSource(Enum):
-    """Sources of retrieved documents."""
     BM25 = "bm25"
     VECTOR = "vector"
     HYBRID = "hybrid"
@@ -42,16 +38,32 @@ class RetrievalSource(Enum):
 
 @dataclass
 class RetrievedDocument:
-    """A document retrieved from the search index."""
-    id: str
+    id: Any
     content: str
     score: float
-    source: RetrievalSource
-    rank: int
-    metadata: Dict[str, Any] = None
+    source: RetrievalSource = RetrievalSource.HYBRID
+    rank: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
     bm25_score: Optional[float] = None
     vector_similarity: Optional[float] = None
-    
+    parent_id: Optional[int] = None
+    document_id: Optional[str] = None
+    section_path: List[str] = field(default_factory=list)
+    is_parent: bool = False
+    contextual_prefix: Optional[str] = None
+    parent_content: Optional[str] = None
+
+    @property
+    def rerank_text(self) -> str:
+        """Text handed to the cross-encoder (context helps short chunks)."""
+        prefix = f"{self.contextual_prefix}\n\n" if self.contextual_prefix else ""
+        return f"{prefix}{self.content}"
+
+    @property
+    def context_text(self) -> str:
+        """Text handed to the generator: prefer the full parent section."""
+        return self.parent_content or self.rerank_text
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -62,703 +74,334 @@ class RetrievedDocument:
             "metadata": self.metadata or {},
             "bm25_score": self.bm25_score,
             "vector_similarity": self.vector_similarity,
+            "parent_id": self.parent_id,
+            "document_id": self.document_id,
+            "section_path": self.section_path,
+            "is_parent": self.is_parent,
+            "contextual_prefix": self.contextual_prefix,
+            "parent_content": self.parent_content,
         }
 
 
 @dataclass
 class HybridSearchConfig:
-    """Configuration for hybrid search."""
-    # RRF configuration
-    rrf_k: int = 50  # RRF constant (higher = more weight to lower ranks)
-    
-    # Weights for weighted sum fusion
+    rrf_k: int = 50
     bm25_weight: float = 0.5
     vector_weight: float = 0.5
-    
-    # Retrieval counts
     bm25_top_k: int = 50
     vector_top_k: int = 50
-    fusion_top_k: int = 50  # Candidates before reranking
-    final_top_k: int = 8   # Final results after reranking
-    
-    # Reranking
+    fusion_top_k: int = 50
+    final_top_k: int = 8
     use_reranking: bool = True
     reranker_top_k: int = 8
-    
-    # Score normalization
-    normalize_scores: bool = True
+    retrieval_mode: str = "hybrid"  # hybrid | bm25_only | vector_only
+    expand_parents: bool = True
 
 
 class ReciprocalRankFusion:
-    """
-    Implements Reciprocal Rank Fusion (RRF) for combining ranked lists.
-    
-    RRF formula: score(d) = sum_over_lists(1 / (rank(d) + k))
-    
-    Where:
-    - rank(d) is the rank of document d in a particular list
-    - k is a constant (typically 50-60)
-    
-    RRF is robust, parameter-free (mostly), and doesn't require
-    score normalization across different ranking functions.
-    
-    Reference: https://www.blog.google/technology/search/elliptic-curve-encryption-and-quantum/
-    """
-    
+    """score(d) = sum(1 / (rank(d) + k)) across ranked lists."""
+
     def __init__(self, k: int = 50):
-        """
-        Initialize RRF fusion.
-        
-        Args:
-            k: RRF constant (default 50). Higher values reduce the
-               impact of rank position on the final score.
-        """
+        if k < 1:
+            raise ValueError("RRF k must be >= 1")
         self.k = k
-    
+
     def fuse(
         self,
-        ranked_lists: List[List[RetrievedDocument]],
+        ranked_lists: Sequence[Sequence[RetrievedDocument]],
         top_k: int = 50,
     ) -> List[RetrievedDocument]:
-        """
-        Fuse multiple ranked lists using RRF.
-        
-        Args:
-            ranked_lists: List of ranked document lists from different sources
-            top_k: Number of top results to return
-            
-        Returns:
-            Fused and ranked list of documents
-        """
-        # Build document scores across all lists
-        doc_scores: Dict[str, Dict[str, Any]] = {}
-        
-        for rank_list in ranked_lists:
-            for rank, doc in enumerate(rank_list, start=1):
-                doc_id = doc.id
-                
-                if doc_id not in doc_scores:
-                    doc_scores[doc_id] = {
-                        "doc": doc,
-                        "rrf_score": 0.0,
-                        "ranks": [],
-                        "sources": set(),
-                    }
-                
-                # RRF contribution: 1 / (rank + k)
-                rrf_contribution = 1.0 / (rank + self.k)
-                doc_scores[doc_id]["rrf_score"] += rrf_contribution
-                doc_scores[doc_id]["ranks"].append(rank)
-                doc_scores[doc_id]["sources"].add(doc.source)
-        
-        # Sort by RRF score descending
-        sorted_docs = sorted(
-            doc_scores.values(),
-            key=lambda x: x["rrf_score"],
-            reverse=True,
-        )
-        
-        # Create result documents with fused scores
-        results = []
-        for rank, item in enumerate(sorted_docs[:top_k], start=1):
-            doc = item["doc"]
-            # Update score to be the RRF score
-            doc.score = item["rrf_score"]
+        scores: Dict[str, Dict[str, Any]] = {}
+
+        for ranked in ranked_lists:
+            for rank, doc in enumerate(ranked, start=1):
+                key = str(doc.id)
+                entry = scores.setdefault(
+                    key,
+                    {"doc": doc, "score": 0.0, "sources": set()},
+                )
+                entry["score"] += 1.0 / (rank + self.k)
+                entry["sources"].add(doc.source)
+
+        ordered = sorted(scores.values(), key=lambda e: e["score"], reverse=True)
+
+        results: List[RetrievedDocument] = []
+        for rank, entry in enumerate(ordered[:top_k], start=1):
+            doc = entry["doc"]
+            doc.score = float(entry["score"])
             doc.rank = rank
             doc.source = RetrievalSource.HYBRID
             results.append(doc)
-        
         return results
-    
-    def fuse_with_weights(
-        self,
-        ranked_lists: List[Tuple[List[RetrievedDocument], float]],
-        top_k: int = 50,
-    ) -> List[RetrievedDocument]:
-        """
-        Fuse ranked lists with source weights.
-        
-        Args:
-            ranked_lists: List of (ranked_list, weight) tuples
-            top_k: Number of top results to return
-            
-        Returns:
-            Fused and ranked list of documents
-        """
-        doc_scores: Dict[str, Dict[str, Any]] = {}
-        
-        for rank_list, weight in ranked_lists:
-            for rank, doc in enumerate(rank_list, start=1):
-                doc_id = doc.id
-                
-                if doc_id not in doc_scores:
-                    doc_scores[doc_id] = {
-                        "doc": doc,
-                        "weighted_score": 0.0,
-                        "ranks": [],
-                        "sources": set(),
-                    }
-                
-                # Weighted RRF contribution
-                rrf_contribution = weight / (rank + self.k)
-                doc_scores[doc_id]["weighted_score"] += rrf_contribution
-                doc_scores[doc_id]["ranks"].append(rank)
-                doc_scores[doc_id]["sources"].add(doc.source)
-        
-        # Sort by weighted score descending
-        sorted_docs = sorted(
-            doc_scores.values(),
-            key=lambda x: x["weighted_score"],
-            reverse=True,
-        )
-        
-        results = []
-        for rank, item in enumerate(sorted_docs[:top_k], start=1):
-            doc = item["doc"]
-            doc.score = item["weighted_score"]
-            doc.rank = rank
-            doc.source = RetrievalSource.HYBRID
-            results.append(doc)
-        
-        return results
-
-
-class ScoreNormalizer:
-    """Normalize scores from different retrieval methods to comparable scales."""
-    
-    @staticmethod
-    def min_max_normalize(scores: List[float]) -> List[float]:
-        """Normalize scores to [0, 1] range using min-max scaling."""
-        if not scores:
-            return []
-        
-        min_score = min(scores)
-        max_score = max(scores)
-        range_score = max_score - min_score
-        
-        if range_score == 0:
-            return [1.0] * len(scores)  # All same score
-        
-        return [(s - min_score) / range_score for s in scores]
-    
-    @staticmethod
-    def sigmoid_normalize(scores: List[float], temperature: float = 1.0) -> List[float]:
-        """Normalize scores using sigmoid function."""
-        return [1 / (1 + math.exp(-s / temperature)) for s in scores]
-    
-    @staticmethod
-    def rank_based_normalize(ranks: List[int], total: int) -> List[float]:
-        """Normalize by rank position (1 = best)."""
-        return [(total - r + 1) / total for r in ranks]
 
 
 class HybridRetriever:
-    """
-    Hybrid retriever combining BM25 and vector search with RRF fusion.
-    
-    This is the main retrieval class that orchestrates:
-    1. BM25 full-text search via PostgreSQL tsvector
-    2. Vector similarity search via pgvector HNSW
-    3. RRF fusion of results
-    4. Optional cross-encoder reranking
-    
-    Example:
-        retriever = HybridRetriever(db_client, config)
-        results = retriever.search(
-            query="What are the compliance requirements?",
-            tenant_id="org_123",
-            top_k=8
-        )
-    """
-    
+    """Org-scoped hybrid retrieval backed by Supabase RPC functions."""
+
     def __init__(
         self,
-        db_client=None,  # Supabase client
+        db_client=None,
         config: Optional[HybridSearchConfig] = None,
-        embedding_service=None,  # VoyageEmbeddingService or similar
-        reranker=None,  # VoyageReranker or similar
+        embedding_service=None,
+        reranker=None,
     ):
-        """
-        Initialize HybridRetriever.
-        
-        Args:
-            db_client: Database client for queries
-            config: Hybrid search configuration
-            embedding_service: Service for generating query embeddings
-            reranker: Optional cross-encoder reranker
-        """
         self.db_client = db_client
         self.config = config or HybridSearchConfig()
         self.embedding_service = embedding_service
         self.reranker = reranker
         self.rrf_fuser = ReciprocalRankFusion(k=self.config.rrf_k)
-    
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
     def search(
         self,
         query: str,
-        tenant_id: str,
+        tenant_id: Optional[str] = None,
         organization_id: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
         top_k: Optional[int] = None,
+        document_id: Optional[str] = None,
+        retrieval_mode: Optional[str] = None,
     ) -> List[RetrievedDocument]:
+        """Retrieve child chunks for a query.
+
+        ``tenant_id`` and ``organization_id`` are aliases for the org UUID.
+        Supplying neither is a programming error: an unscoped vector query
+        would cross tenant boundaries.
         """
-        Perform hybrid search with fusion and optional reranking.
-        
-        Args:
-            query: Search query text
-            tenant_id: Tenant ID for RLS enforcement
-            organization_id: Organization ID for additional filtering
-            filters: Additional metadata filters
-            top_k: Final number of results (uses config.final_top_k by default)
-            
-        Returns:
-            List of retrieved documents ranked by relevance
-        """
-        top_k = top_k or self.config.final_top_k
-        
-        # Step 1: Get results from both retrieval methods
-        bm25_results = self._bm25_search(
-            query, tenant_id, organization_id, filters, self.config.bm25_top_k
-        )
-        
-        vector_results = self._vector_search(
-            query, tenant_id, organization_id, filters, self.config.vector_top_k
-        )
-        
-        # Step 2: Fuse results using RRF
-        fused_results = self.rrf_fuser.fuse(
-            [bm25_results, vector_results],
-            top_k=self.config.fusion_top_k,
-        )
-        
-        # Step 3: Optional cross-encoder reranking
-        if self.config.use_reranking and self.reranker and fused_results:
-            reranked = self._rerank(
-                query, fused_results, top_k=self.config.reranker_top_k
-            )
-            return reranked[:top_k]
-        
-        return fused_results[:top_k]
-    
-    def _bm25_search(
-        self,
-        query: str,
-        tenant_id: str,
-        organization_id: Optional[str],
-        filters: Optional[Dict[str, Any]],
-        top_k: int,
-    ) -> List[RetrievedDocument]:
-        """
-        Perform BM25 full-text search using PostgreSQL tsvector.
-        
-        Requires the documents table to have a tsvector column
-        and appropriate GIN index.
-        
-        Args:
-            query: Search query
-            tenant_id: Tenant ID for RLS
-            organization_id: Optional org filter
-            filters: Additional filters
-            top_k: Number of results
-            
-        Returns:
-            Ranked list of documents from BM25
-        """
+        org_id = organization_id or tenant_id
+        if not org_id:
+            raise ValueError("org_id is required for retrieval (multi-tenant isolation).")
         if not self.db_client:
-            # Return empty for demo/testing
-            return []
-        
-        # Build SQL query for BM25 search
-        # Note: This assumes a tsvector column 'search_text' exists
-        sql = """
-        SELECT 
-            id,
-            content,
-            ts_rank_cd(search_text, plainto_tsquery('english', :query)) as bm25_score,
-            metadata
-        FROM documents
-        WHERE 
-            search_text @@ plainto_tsquery('english', :query)
-            AND tenant_id = :tenant_id
-            {org_filter}
-            {metadata_filters}
-        ORDER BY bm25_score DESC
-        LIMIT :limit
-        """
-        
-        # Build parameter dict
-        params = {
-            "query": query,
-            "tenant_id": tenant_id,
-            "limit": top_k,
-        }
-        
-        org_filter = ""
-        if organization_id:
-            org_filter = "AND organization_id = :org_id"
-            params["org_id"] = organization_id
-        
-        # Would execute query and return results
-        # For now, return empty (implementation depends on DB schema)
-        return self._execute_bm25_query(sql, params, top_k)
-    
-    def _execute_bm25_query(
-        self, sql: str, params: Dict[str, Any], top_k: int
-    ) -> List[RetrievedDocument]:
-        """Execute BM25 query and return results."""
-        # This would be implemented with actual DB execution
-        # Placeholder for now
-        return []
-    
-    def _vector_search(
+            raise RuntimeError("HybridRetriever requires a Supabase client.")
+
+        mode = (retrieval_mode or self.config.retrieval_mode or "hybrid").lower()
+        if mode not in {"hybrid", "bm25_only", "vector_only"}:
+            raise ValueError(f"Unsupported retrieval mode: {mode}")
+
+        top_k = top_k or self.config.final_top_k
+
+        query_embedding = None
+        if mode != "bm25_only":
+            if not self.embedding_service:
+                if mode == "vector_only":
+                    raise RuntimeError("vector_only retrieval requires an embedding service.")
+                logger.warning("No embedding service; falling back to lexical-only retrieval.")
+                mode = "bm25_only"
+            else:
+                query_embedding = self.embedding_service.embed_query(query)
+                if not query_embedding:
+                    if mode == "vector_only":
+                        raise RuntimeError("Embedding provider returned an empty query vector.")
+                    logger.warning("Empty query embedding; falling back to lexical-only retrieval.")
+                    mode = "bm25_only"
+
+        rows = self._hybrid_rpc(
+            query=query,
+            query_embedding=query_embedding,
+            org_id=str(org_id),
+            document_id=document_id,
+            mode=mode,
+        )
+
+        results = [self._row_to_document(row, index) for index, row in enumerate(rows)]
+
+        if self.config.use_reranking and self.reranker and results:
+            results = self._rerank(query, results, top_k=self.config.reranker_top_k)
+
+        results = results[:top_k]
+
+        if self.config.expand_parents and results:
+            self._expand_parents(results, org_id=str(org_id))
+
+        return results
+
+    def search_with_parents(
         self,
         query: str,
-        tenant_id: str,
-        organization_id: Optional[str],
-        filters: Optional[Dict[str, Any]],
-        top_k: int,
-    ) -> List[RetrievedDocument]:
-        """
-        Perform vector similarity search using pgvector HNSW.
-        
-        Args:
-            query: Search query
-            tenant_id: Tenant ID for RLS
-            organization_id: Optional org filter
-            filters: Additional filters
-            top_k: Number of results
-            
-        Returns:
-            Ranked list of documents by vector similarity
-        """
-        if not self.db_client or not self.embedding_service:
-            return []
-        
-        # Generate query embedding
-        query_embedding = self.embedding_service.embed_query(query)
-        
-        # Call pgvector similarity search
-        # Using cosine distance (<=>) for similarity
-        sql = """
-        SELECT 
-            id,
-            content,
-            1 - (embedding <=> :query_embedding::vector) as vector_similarity,
-            metadata
-        FROM documents
-        WHERE 
-            embedding IS NOT NULL
-            AND tenant_id = :tenant_id
-            {org_filter}
-            {metadata_filters}
-        ORDER BY embedding <=> :query_embedding::vector
-        LIMIT :limit
-        """
-        
+        tenant_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        retrieve_parents: bool = True,
+        top_k: int = 8,
+        document_id: Optional[str] = None,
+        retrieval_mode: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        results = self.search(
+            query=query,
+            tenant_id=tenant_id,
+            organization_id=organization_id,
+            top_k=top_k,
+            document_id=document_id,
+            retrieval_mode=retrieval_mode,
+        )
+        parents = [doc for doc in results if doc.parent_content] if retrieve_parents else []
+        return {"children": results, "parents": parents, "all_results": results}
+
+    # ------------------------------------------------------------------
+    # RPC execution
+    # ------------------------------------------------------------------
+    def _hybrid_rpc(
+        self,
+        query: str,
+        query_embedding: Optional[List[float]],
+        org_id: str,
+        document_id: Optional[str],
+        mode: str,
+    ) -> List[Dict[str, Any]]:
         params = {
+            "query_text": query,
             "query_embedding": query_embedding,
-            "tenant_id": tenant_id,
-            "limit": top_k,
+            "filter_org_id": org_id,
+            "filter_document_id": document_id,
+            # lexical/vector budgets are controlled by the mode
+            "bm25_top_k": self.config.bm25_top_k if mode != "vector_only" else 0,
+            "vector_top_k": self.config.vector_top_k if mode != "bm25_only" else 0,
+            "rrf_k": self.config.rrf_k,
+            "final_top_k": self.config.fusion_top_k,
         }
-        
-        return self._execute_vector_query(sql, params, top_k)
-    
-    def _execute_vector_query(
-        self, sql: str, params: Dict[str, Any], top_k: int
-    ) -> List[RetrievedDocument]:
-        """Execute vector search query and return results."""
-        # Placeholder for actual DB execution
-        return []
-    
+
+        try:
+            response = self.db_client.rpc("hybrid_search_documents", params).execute()
+            return list(response.data or [])
+        except Exception as exc:
+            if not self._is_missing_function(exc):
+                raise
+
+            logger.warning(
+                "hybrid_search_documents is unavailable (%s). "
+                "Apply supabase/migrations/002_hybrid_search.sql. "
+                "Falling back to org-scoped vector search for this query.",
+                exc,
+            )
+            if not query_embedding:
+                raise RuntimeError(
+                    "Hybrid retrieval function is missing and no query embedding is "
+                    "available. Apply migration 002_hybrid_search.sql."
+                ) from exc
+
+            fallback = self.db_client.rpc(
+                "match_documents_org",
+                {
+                    "query_embedding": query_embedding,
+                    "match_count": self.config.vector_top_k,
+                    "filter_org_id": org_id,
+                    "filter_document_id": document_id,
+                },
+            ).execute()
+            return list(fallback.data or [])
+
+    @staticmethod
+    def _is_missing_function(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return (
+            "pgrst202" in text
+            or "could not find the function" in text
+            or "does not exist" in text and "function" in text
+        )
+
+    def _row_to_document(self, row: Dict[str, Any], index: int) -> RetrievedDocument:
+        source_type = (row.get("source_type") or "hybrid").lower()
+        source = {
+            "bm25": RetrievalSource.BM25,
+            "vector": RetrievalSource.VECTOR,
+            "hybrid": RetrievalSource.HYBRID,
+        }.get(source_type, RetrievalSource.HYBRID)
+
+        score = row.get("rrf_score")
+        if score is None:
+            score = row.get("similarity")
+        if score is None:
+            score = row.get("text_rank", 0)
+
+        return RetrievedDocument(
+            id=row.get("id", f"row_{index}"),
+            content=row.get("content") or "",
+            score=float(score or 0.0),
+            source=source,
+            rank=int(row.get("rank_position") or index + 1),
+            metadata=row.get("metadata") or {},
+            bm25_score=row.get("text_rank", row.get("bm25_score")),
+            vector_similarity=row.get("vector_similarity"),
+            parent_id=row.get("parent_id"),
+            document_id=str(row["document_id"]) if row.get("document_id") else None,
+            section_path=list(row.get("section_path") or []),
+            is_parent=bool(row.get("is_parent", False)),
+            contextual_prefix=row.get("contextual_prefix"),
+        )
+
+    # ------------------------------------------------------------------
+    # Rerank / parent expansion
+    # ------------------------------------------------------------------
     def _rerank(
         self,
         query: str,
         documents: List[RetrievedDocument],
         top_k: int,
     ) -> List[RetrievedDocument]:
-        """
-        Rerank documents using cross-encoder.
-        
-        Args:
-            query: Original search query
-            documents: Candidate documents to rerank
-            top_k: Number of top results to return
-            
-        Returns:
-            Reranked documents
-        """
-        if not self.reranker or not documents:
-            return documents
-        
-        # Extract content for reranking
-        doc_contents = [doc.content for doc in documents]
-        
         try:
-            reranked = self.reranker.rerank(query, doc_contents, top_k=top_k)
-            
-            # Update document scores
-            results = []
-            for item in reranked:
-                # Find original document by index
-                orig_doc = documents[item["index"]]
-                orig_doc.score = item["relevance_score"]
-                orig_doc.rank = len(results) + 1
-                results.append(orig_doc)
-            
-            return results
-        except Exception as e:
-            # Reranking failed, return original order
-            print(f"Reranking failed: {e}")
+            reranked = self.reranker.rerank(
+                query,
+                [doc.rerank_text for doc in documents],
+                top_k=min(top_k, len(documents)),
+            )
+        except Exception as exc:
+            logger.warning("Reranking failed; keeping RRF order: %s", exc)
             return documents
-    
-    def search_with_parents(
-        self,
-        query: str,
-        tenant_id: str,
-        organization_id: Optional[str] = None,
-        retrieve_parents: bool = True,
-        top_k: int = 8,
-    ) -> Dict[str, Any]:
-        """
-        Hybrid search with parent-child expansion.
-        
-        First retrieves child chunks, then expands to parent sections
-        for full context.
-        
-        Args:
-            query: Search query
-            tenant_id: Tenant ID
-            organization_id: Optional org filter
-            retrieve_parents: Whether to expand to parent chunks
-            top_k: Number of final results
-            
-        Returns:
-            Dict with 'children', 'parents', and 'all_results'
-        """
-        # Get hybrid search results
-        results = self.search(query, tenant_id, organization_id, top_k=top_k * 2)
-        
-        if not retrieve_parents:
-            return {
-                "children": results[:top_k],
-                "parents": [],
-                "all_results": results[:top_k],
-            }
-        
-        # Would expand to parents using ParentChildIndex
-        # Placeholder: just return results
-        return {
-            "children": results[:top_k],
-            "parents": [],
-            "all_results": results[:top_k],
-        }
-    
-    def hybrid_search_sql(
-        self,
-        query: str,
-        tenant_id: str,
-        organization_id: Optional[str] = None,
-    ) -> str:
-        """
-        Generate SQL for hybrid search with RRF fusion.
-        
-        Returns a SQL query that performs:
-        1. BM25 search via tsvector
-        2. Vector search via pgvector
-        3. RRF fusion in SQL
-        
-        This can be executed directly in PostgreSQL for efficient
-        server-side fusion.
-        
-        Args:
-            query: Search query
-            tenant_id: Tenant ID
-            organization_id: Optional org filter
-            
-        Returns:
-            SQL query string
-        """
-        org_filter = ""
-        if organization_id:
-            org_filter = "AND organization_id = '" + organization_id + "'"
-        
-        sql = f"""
-        WITH 
-        -- BM25 results
-        bm25_results AS (
-            SELECT 
-                id,
-                content,
-                metadata,
-                ts_rank_cd(search_text, plainto_tsquery('english', :query)) as bm25_score,
-                0 as vector_similarity,
-                1 as source_type  -- 1 = BM25
-            FROM documents
-            WHERE 
-                search_text @@ plainto_tsquery('english', :query)
-                AND tenant_id = :tenant_id
-                {org_filter}
-        ),
-        
-        -- Vector results
-        vector_results AS (
-            SELECT 
-                id,
-                content,
-                metadata,
-                0 as bm25_score,
-                1 - (embedding <=> :query_embedding::vector) as vector_similarity,
-                2 as source_type  -- 2 = vector
-            FROM documents
-            WHERE 
-                embedding IS NOT NULL
-                AND tenant_id = :tenant_id
-                {org_filter}
-        ),
-        
-        -- Union of both
-        combined AS (
-            SELECT * FROM bm25_results
-            UNION ALL
-            SELECT * FROM vector_results
-        ),
-        
-        -- Rank each source separately
-        ranked AS (
-            SELECT 
-                *,
-                ROW_NUMBER() OVER (
-                    PARTITION BY source_type 
-                    ORDER BY 
-                        CASE WHEN source_type = 1 THEN bm25_score END DESC NULLS LAST,
-                        CASE WHEN source_type = 2 THEN vector_similarity END DESC NULLS LAST
-                ) as source_rank
-            FROM combined
-        )
-        
-        -- RRF fusion
-        SELECT 
-            id,
-            content,
-            metadata,
-            SUM(1.0 / (source_rank + :rrf_k)) as rrf_score,
-            ARRAY_AGG(DISTINCT source_type) as sources
-        FROM ranked
-        GROUP BY id, content, metadata
-        ORDER BY rrf_score DESC
-        LIMIT :top_k
-        """
-        
-        return sql
+
+        results: List[RetrievedDocument] = []
+        seen = set()
+        for item in reranked:
+            index = item.get("index")
+            if index is None or not (0 <= index < len(documents)):
+                continue
+            doc = documents[index]
+            if doc.id in seen:
+                continue
+            seen.add(doc.id)
+            doc.score = float(item.get("relevance_score", doc.score))
+            doc.rank = len(results) + 1
+            results.append(doc)
+
+        # Keep any candidates the reranker did not return.
+        for doc in documents:
+            if doc.id not in seen:
+                doc.rank = len(results) + 1
+                results.append(doc)
+        return results
+
+    def _expand_parents(self, documents: List[RetrievedDocument], org_id: str) -> None:
+        parent_ids = sorted({doc.parent_id for doc in documents if doc.parent_id})
+        if not parent_ids:
+            return
+
+        try:
+            response = (
+                self.db_client.table("documents")
+                .select("id,content,section_path,contextual_prefix,is_parent")
+                .eq("org_id", org_id)
+                .in_("id", parent_ids)
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning("Parent expansion failed: %s", exc)
+            return
+
+        parents = {row["id"]: row for row in (response.data or [])}
+        for doc in documents:
+            parent = parents.get(doc.parent_id)
+            if parent and parent.get("content"):
+                doc.parent_content = parent["content"]
+                if not doc.section_path and parent.get("section_path"):
+                    doc.section_path = list(parent["section_path"])
 
 
-class BM25Postgres:
-    """
-    PostgreSQL BM25 search implementation using tsvector.
-    
-    Sets up and queries PostgreSQL's built-in full-text search
-    with BM25 ranking via ts_rank_cd.
-    
-    Requires:
-    - tsvector column with GIN index
-    - OR extension like pg_search for true BM25
-    """
-    
-    def __init__(self, db_client):
-        self.db_client = db_client
-    
-    def setup_tsvector_column(self, table: str = "documents", column: str = "content"):
-        """
-        Set up tsvector column for full-text search.
-        
-        Creates a generated tsvector column and GIN index.
-        """
-        sql = f"""
-        -- Add tsvector column
-        ALTER TABLE {table} 
-        ADD COLUMN IF NOT EXISTS search_text tsvector;
-        
-        -- Populate existing rows
-        UPDATE {table} 
-        SET search_text = to_tsvector('english', content)
-        WHERE search_text IS NULL;
-        
-        -- Create trigger to keep tsvector updated
-        CREATE OR REPLACE FUNCTION documents_search_text_update() RETURNS trigger AS $$
-        BEGIN
-            NEW.search_text := to_tsvector('english', NEW.content);
-            RETURN NEW;
-        END
-        $$ LANGUAGE plpgsql;
-        
-        DROP TRIGGER IF EXISTS documents_search_text_trigger ON {table};
-        CREATE TRIGGER documents_search_text_trigger
-            BEFORE INSERT OR UPDATE ON {table}
-            FOR EACH ROW EXECUTE FUNCTION documents_search_text_update();
-        
-        -- Create GIN index for fast search
-        CREATE INDEX IF NOT EXISTS documents_search_text_idx 
-        ON {table} USING GIN(search_text);
-        """
-        
-        return sql
-    
-    def search(
-        self,
-        query: str,
-        table: str = "documents",
-        tenant_id: Optional[str] = None,
-        top_k: int = 50,
-        filters: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Perform BM25 search with ts_rank_cd ranking.
-        
-        Args:
-            query: Search query (will be converted to tsquery)
-            table: Table to search
-            tenant_id: Optional tenant filter for RLS
-            top_k: Number of results
-            filters: Additional WHERE conditions
-            
-        Returns:
-            List of matching documents with scores
-        """
-        # Build WHERE clauses
-        where_clauses = ["search_text @@ plainto_tsquery('english', :query)"]
-        
-        params = {"query": query}
-        
-        if tenant_id:
-            where_clauses.append("tenant_id = :tenant_id")
-            params["tenant_id"] = tenant_id
-        
-        if filters:
-            for key, value in filters.items():
-                if isinstance(value, str):
-                    where_clauses.append(f"{key} = :{key}")
-                    params[key] = value
-                elif isinstance(value, list):
-                    placeholders = ",".join([f":{key}_{i}" for i in range(len(value))])
-                    where_clauses.append(f"{key} = ANY(ARRAY[{placeholders}]::text[])")
-                    for i, v in enumerate(value):
-                        params[f"{key}_{i}"] = v
-        
-        where_sql = " AND ".join(where_clauses)
-        
-        sql = f"""
-        SELECT 
-            id,
-            content,
-            ts_rank_cd(search_text, plainto_tsquery('english', :query)) as score,
-            metadata
-        FROM {table}
-        WHERE {where_sql}
-        ORDER BY score DESC
-        LIMIT :top_k
-        """
-        params["top_k"] = top_k
-        
-        # Execute and return
-        # Would use self.db_client.execute(sql, params)
+def normalize_scores(scores: Sequence[float]) -> List[float]:
+    """Min-max normalise scores; identical scores map to 1.0."""
+    if not scores:
         return []
+    values = np.asarray(scores, dtype=float)
+    spread = values.max() - values.min()
+    if spread == 0:
+        return [1.0] * len(values)
+    return ((values - values.min()) / spread).tolist()

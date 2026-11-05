@@ -1,55 +1,60 @@
 {
-  "description": "Minimum acceptable thresholds for RAG evaluation metrics",
-  "version": "1.0",
-  "failure_action": "comment_on_pr",
+  "description": "Release gates for the TenderSync RAG pipeline",
+  "version": "2.0",
   "thresholds": {
     "context_recall": {
       "min": 0.80,
       "target": 0.90,
-      "weight": 0.20,
-      "description": "Percentage of relevant context retrieved"
+      "required": true,
+      "description": "Share of ground-truth evidence present in retrieved context"
     },
     "context_precision": {
       "min": 0.70,
       "target": 0.85,
-      "weight": 0.20,
-      "description": "Quality of retrieved context ranking"
+      "required": true,
+      "description": "Ranking quality of retrieved evidence"
     },
     "faithfulness": {
       "min": 0.85,
       "target": 0.95,
-      "weight": 0.25,
-      "description": "How factually accurate the answer is (no hallucination)"
+      "required": true,
+      "description": "Share of answer sentences supported by retrieved evidence"
     },
     "answer_relevance": {
       "min": 0.75,
       "target": 0.90,
-      "weight": 0.20,
-      "description": "How relevant the answer is to the query"
-    },
-    "answer_similarity": {
-      "min": 0.70,
-      "target": 0.85,
-      "weight": 0.15,
-      "description": "Similarity to ground truth answer"
+      "required": true,
+      "description": "How directly the answer addresses the query"
     },
     "ndcg": {
       "min": 0.75,
       "target": 0.90,
-      "weight": 0.15,
-      "description": "Normalized Discounted Cumulative Gain"
+      "required": false,
+      "description": "NDCG@10 of retrieved evidence"
+    },
+    "answer_similarity": {
+      "min": 0.70,
+      "target": 0.85,
+      "required": false,
+      "description": "Token F1 against the reference answer"
     },
     "compliance_score_accuracy": {
       "min": 0.80,
       "target": 0.95,
-      "weight": 0.10,
-      "description": "Accuracy of compliance score extraction"
+      "required": false,
+      "description": "Accuracy of extracted compliance percentages"
+    },
+    "budget_extraction_accuracy": {
+      "min": 0.80,
+      "target": 0.95,
+      "required": false,
+      "description": "Accuracy of extracted contract values"
     },
     "citation_verification_rate": {
       "min": 0.90,
       "target": 0.98,
-      "weight": 0.15,
-      "description": "Rate of verified citations"
+      "required": false,
+      "description": "Share of claims with supporting evidence"
     }
   },
   "category_thresholds": {
@@ -63,7 +68,7 @@
     },
     "deadline": {
       "context_recall": 0.90,
-      "accenture": 0.95
+      "answer_relevance": 0.85
     }
   },
   "ablation_comparison": {

@@ -111,3 +111,13 @@ class GenerateProposalRequest(BaseModel):
 
 class CompareTendersRequest(BaseModel):
     tender_ids: List[str] = Field(min_length=2, max_length=3)
+
+
+class RAGQueryRequest(BaseModel):
+    query: str = Field(min_length=3, max_length=2000)
+    document_id: Optional[str] = None
+    top_k: int = Field(default=8, ge=1, le=50)
+    retrieval_mode: str = Field(
+        default="hybrid",
+        pattern="^(hybrid|bm25_only|vector_only)$",
+    )

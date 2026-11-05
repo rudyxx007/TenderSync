@@ -307,14 +307,14 @@ graph TD
 | **Frontend** | **React 19** · **Vite 7** · **TanStack Router** · **Tailwind CSS v4** · **Framer Motion** · **Aceternity UI** · **Magic UI** · **Recharts** · **Lucide Icons** |
 | **Backend API** | **FastAPI** · **Python 3.10+** · **Pydantic v2** · **Uvicorn** (ASGI) · Domain-Driven Routers |
 | **AI Models & Agents** | **OpenAI GPT-OSS-120B** (via Groq Inference) · **LangGraph** (Multi-Agent State Machine: Executive, Technical, Compliance, Pricing, Timeline) |
-| **RAG & Embeddings** | **Hugging Face BAAI/bge-m3** (1024-dim dense vectors) · **LangChain** (Recursive Semantic Text Splitters) |
+| **RAG & Embeddings** | **Hybrid BM25 + pgvector HNSW** fused with **RRF** · Contextual parent-child chunking · Cross-encoder reranking · **Voyage AI / BAAI/bge-m3** (1024-dim) |
 | **Document Ingestion** | **Docling** (IBM Deep Search Parser) · **RapidOCR** (ONNX Scan OCR Engine) · **PyPDFium2** |
-| **Database & Vector Store** | **Supabase** · **PostgreSQL** · **pgvector** (IVFFlat Indexing + Cosine Similarity RPC) · Multi-Tenant RLS |
+| **Database & Vector Store** | **Supabase** · **PostgreSQL** · **pgvector HNSW + tsvector/GIN** · Org-Scoped RLS |
 | **Tender Discovery** | **Selenium** (Headless Browser Automation) · **BeautifulSoup4** · **HTTPX** (CPPP Portal Scraper) |
 | **Export & Reporting** | **WeasyPrint** (HTML/CSS to PDF Engine) · **Recharts / Plotly** (Polar Radar Visualizations) · **Jinja2** · **python-docx** |
 | **Auth & Security** | **Supabase Auth** (JWT Tokens) · **Role-Based Access Control (RBAC)** (`owner`/`admin`/`member`) · Multi-Tenant 8-char Invites |
 | **Networking & Tunneling** | **Localtunnel** (`tendersync-ind-rudyxx007.loca.lt`) · **Vercel** (Global Edge Frontend) |
-| **Testing & CI** | **Pytest** (68 Unit & Integration Tests — 100% Pass Rate) |
+| **Testing & CI** | **Pytest** (153 backend tests) · Offline RAG regression suite · Gated per-benchmark live evaluation workflow |
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
@@ -374,7 +374,7 @@ TenderSync/
 │   ├── routers/                # Domain-driven FastAPI routers (auth, orgs, profiles, tenders, proposals, market, batches, exports)
 │   ├── templates/              # Jinja2 HTML templates for downloadable PDF reports
 │   ├── supabase/               # PostgreSQL + pgvector schema & versioned migrations (001 to 006)
-│   └── tests/                  # 68 automated unit tests (100% pass rate)
+│   └── tests/                  # 153 automated backend tests
 │
 ├── docs/                       # Architecture & design specifications
 ├── assets/                     # Project logo and system architecture diagrams
@@ -475,6 +475,72 @@ The frontend will run at `http://localhost:5173`.
 cd backend
 python -m pytest tests/
 ```
+
+The offline RAG/evaluation checks (no credentials required) are:
+```bash
+python -m pytest tests/test_rag_core.py tests/test_evaluation_standalone.py --noconftest
+python -m evaluation.validate_dataset --dataset evaluation/datasets/financebench.json --benchmark financebench
+python -m evaluation.validate_dataset --dataset evaluation/datasets/cuad.json --benchmark cuad
+```
+
+### 6. Run the RAG Benchmark & Evaluation
+
+The evaluation set is split into two independent benchmark files:
+
+- `backend/evaluation/datasets/financebench.json` — **55 FinanceBench** samples
+  using human-annotated evidence spans because the merged JSONL does not ship the
+  source 10-K PDFs. This is labelled `evidence_only` and is a retrieval sanity
+  harness, not the full-document FinanceBench leaderboard.
+- `backend/evaluation/datasets/cuad.json` — **45 CUAD** contract-clause samples
+  using the full contract text.
+
+`run_evaluation` requires `--benchmark financebench` or `--benchmark cuad` and
+rejects any dataset containing more than one source. FinanceBench and CUAD are
+never scored in one run or one blended metric. The 10-sample
+`golden_dataset_sample.json` is a legacy unit-test fixture, not a benchmark.
+
+AusTender samples are supported through `--austender-manifest`; the public AusTender
+OCDS API exposes contract metadata, not stable full-text RFP documents, so no
+AusTender samples are fabricated into the default set.
+
+```bash
+cd backend
+
+# Run each benchmark independently; repeat this loop for both files.
+for BENCHMARK in financebench cuad; do
+  # 1. Seed only this benchmark's documents into the evaluation tenant.
+  python -m evaluation.ingest_golden \
+    --dataset evaluation/datasets/$BENCHMARK.json \
+    --output evaluation/seeded/$BENCHMARK.json \
+    --tenant-id "$EVAL_TENANT_ID" \
+    --user-id "$EVAL_USER_ID" \
+    --group-by-source
+
+  # 2. Evaluate only this benchmark and enforce its release thresholds.
+  python -m evaluation.run_evaluation \
+    --benchmark "$BENCHMARK" \
+    --dataset evaluation/seeded/$BENCHMARK.json \
+    --output evaluation/results/$BENCHMARK/eval_report.json \
+    --tenant-id "$EVAL_TENANT_ID" \
+    --samples 0 \
+    --fail-on-thresholds \
+    --verbose
+
+  # 3. Optional ablation for this benchmark only.
+  python -m evaluation.run_ablation \
+    --benchmark "$BENCHMARK" \
+    --dataset evaluation/seeded/$BENCHMARK.json \
+    --tenant-id "$EVAL_TENANT_ID" \
+    --output evaluation/results/$BENCHMARK/ablation_report.json
+done
+```
+
+The GitHub Actions workflow (`.github/workflows/rag-eval.yml`) runs the offline
+tests and per-benchmark validation on every push/PR. The live jobs are a matrix
+with one independent FinanceBench job and one independent CUAD job, each with its
+own seeded dataset, report and optional ablation. They run on `main` or manual
+dispatch only when the Supabase/Groq/embedding/evaluation-tenant secrets are
+configured; otherwise they report a skipped live run and do not claim a metric pass.
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
@@ -614,7 +680,7 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
   - [X] Market tender discovery scraper for public procurement portals (CPPP, GeM)
   - [X] Asynchronous batch PDF upload & evaluation worker
   - [X] Calendar export (`.ics` generation) & executive PDF evaluation reports (WeasyPrint + Jinja2)
-  - [X] 68 automated unit & integration tests (100% pass rate)
+  - [X] 153 automated backend tests, including offline RAG regression coverage
 
 - [X] **Phase 2: Modern Web Application (React 19 + Vite 7 + TanStack Router)**
   - [X] High-end dark theme design system built with Tailwind CSS v4 & custom glassmorphism

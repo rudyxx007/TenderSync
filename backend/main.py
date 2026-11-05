@@ -26,6 +26,7 @@ from routers import (
     market_router,
     batches_router,
     exports_router,
+    rag_router,
 )
 
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -58,6 +59,7 @@ app.include_router(proposals_router)
 app.include_router(market_router)
 app.include_router(batches_router)
 app.include_router(exports_router)
+app.include_router(rag_router)
 
 
 @app.get("/")

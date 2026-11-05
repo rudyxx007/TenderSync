@@ -1,475 +1,387 @@
--- TenderSync Enterprise Hybrid Search Migration
--- Adds BM25 full-text search, HNSW vector index, and RRF fusion functions
--- Run after 001_initial_schema.sql
+-- TenderSync Hybrid Retrieval Migration (canonical, idempotent)
+--
+-- Replaces the previous draft, which referenced a non-existent
+-- `organization_members` table and a `schema_migrations` table that was never
+-- created. It also created `document_sections` with a uuid FK to the
+-- bigserial `documents.id`, so it could never be applied.
+--
+-- This migration uses `documents` as the chunk store:
+--   * parent rows:   is_parent = true,  embedding = NULL
+--   * child rows:    is_parent = false, embedding IS NOT NULL, parent_id -> parent row
+-- Every row carries org_id (tenant), document_id (one uploaded file) and
+-- section_path. Retrieval is strictly scoped to org_id.
+--
+-- Safe to re-run.
 
--- ============================================================
--- 1. Enable required extensions
--- ============================================================
 CREATE EXTENSION IF NOT EXISTS vector;
--- tsearch2 is built-in, no extension needed
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version text PRIMARY KEY,
+    applied_at timestamptz NOT NULL DEFAULT now()
+);
 
 -- ============================================================
--- 2. Add full-text search columns to documents table
+-- 1. documents -> hierarchical chunk store
 -- ============================================================
--- Add tsvector column for BM25 search
-ALTER TABLE documents 
-ADD COLUMN IF NOT EXISTS search_text tsvector;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS org_id uuid REFERENCES organizations(id) ON DELETE CASCADE;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS document_id uuid;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS parent_id uuid REFERENCES documents(id) ON DELETE CASCADE;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_parent boolean NOT NULL DEFAULT false;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS chunk_index integer;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS section_path text[] NOT NULL DEFAULT '{}';
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS contextual_prefix text;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS filename text;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS search_text tsvector;
 
--- Populate existing rows with tsvector from content
-UPDATE documents 
-SET search_text = to_tsvector('english', content)
-WHERE search_text IS NULL AND content IS NOT NULL;
+-- Backfill a document_id for legacy rows, grouped by org + filename.
+DO $$
+DECLARE
+    grp record;
+    new_id uuid;
+BEGIN
+    FOR grp IN
+        SELECT DISTINCT
+            org_id,
+            COALESCE(filename, metadata->>'filename', 'legacy-document') AS fname
+        FROM documents
+        WHERE document_id IS NULL
+    LOOP
+        new_id := gen_random_uuid();
+        UPDATE documents
+        SET document_id = new_id,
+            filename = COALESCE(filename, grp.fname)
+        WHERE document_id IS NULL
+          AND org_id IS NOT DISTINCT FROM grp.org_id
+          AND COALESCE(filename, metadata->>'filename', 'legacy-document') = grp.fname;
+    END LOOP;
+END $$;
 
--- Create trigger function to keep tsvector updated
-CREATE OR REPLACE FUNCTION documents_search_text_update() 
+-- ============================================================
+-- 2. Full-text index (contextual prefix + content)
+-- ============================================================
+CREATE OR REPLACE FUNCTION documents_search_text_update()
 RETURNS trigger AS $$
 BEGIN
-    NEW.search_text := to_tsvector('english', NEW.content);
+    NEW.search_text := to_tsvector(
+        'english',
+        COALESCE(NEW.contextual_prefix, '') || ' ' || COALESCE(NEW.content, '')
+    );
     RETURN NEW;
 END
 $$ LANGUAGE plpgsql;
 
--- Create trigger for automatic tsvector updates
 DROP TRIGGER IF EXISTS documents_search_text_trigger ON documents;
 CREATE TRIGGER documents_search_text_trigger
-    BEFORE INSERT OR UPDATE ON documents
-    FOR EACH ROW 
-    EXECUTE FUNCTION documents_search_text_update();
+    BEFORE INSERT OR UPDATE OF content, contextual_prefix ON documents
+    FOR EACH ROW EXECUTE FUNCTION documents_search_text_update();
 
--- Create GIN index for fast full-text search
-CREATE INDEX IF NOT EXISTS documents_search_text_idx 
-ON documents USING GIN(search_text);
+UPDATE documents
+SET search_text = to_tsvector(
+    'english',
+    COALESCE(contextual_prefix, '') || ' ' || COALESCE(content, '')
+)
+WHERE search_text IS NULL;
 
--- ============================================================
--- 3. Upgrade vector index from IVFFlat to HNSW (better accuracy)
--- ============================================================
--- Drop old IVFFlat index if exists
 DROP INDEX IF EXISTS documents_embedding_idx;
+CREATE INDEX IF NOT EXISTS documents_embedding_hnsw_idx
+    ON documents USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
 
--- Create HNSW index for better recall and accuracy
--- HNSW provides better search quality than IVFFlat at cost of larger index
-CREATE INDEX IF NOT EXISTS documents_embedding_hnsw_idx 
-ON documents USING hnsw (embedding vector_cosine_ops)
-WITH (m = 16, ef_construction = 64);
-
--- ============================================================
--- 4. Add tenant_id column for proper multi-tenant isolation
--- ============================================================
-ALTER TABLE documents 
-ADD COLUMN IF NOT EXISTS tenant_id uuid 
-REFERENCES organizations(id) ON DELETE CASCADE;
-
--- Also ensure we have organization_id for broader org-level filtering
-ALTER TABLE documents
-ADD COLUMN IF NOT EXISTS organization_id uuid
-REFERENCES organizations(id) ON DELETE CASCADE;
-
--- Create indexes for tenant filtering
-CREATE INDEX IF NOT EXISTS documents_tenant_id_idx 
-ON documents(tenant_id);
-
-CREATE INDEX IF NOT EXISTS documents_organization_id_idx 
-ON documents(organization_id);
+CREATE INDEX IF NOT EXISTS documents_search_text_idx ON documents USING GIN(search_text);
+CREATE INDEX IF NOT EXISTS documents_org_document_idx ON documents(org_id, document_id);
+CREATE INDEX IF NOT EXISTS documents_org_parent_idx ON documents(org_id, is_parent);
+CREATE INDEX IF NOT EXISTS documents_parent_id_idx ON documents(parent_id);
+CREATE INDEX IF NOT EXISTS documents_metadata_idx ON documents USING GIN(metadata);
 
 -- ============================================================
--- 5. Create document hierarchy tables for parent-child indexing
--- ============================================================
--- Table to store document sections/subsections
-CREATE TABLE IF NOT EXISTS document_sections (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    parent_section_id uuid REFERENCES document_sections(id) ON DELETE CASCADE,
-    title text,
-    level integer DEFAULT 1,
-    start_position integer,
-    end_position integer,
-    content text,
-    content_embedding vector(1024),
-    summary text,
-    created_at timestamptz DEFAULT now()
-);
-
--- Index for section hierarchy queries
-CREATE INDEX IF NOT EXISTS document_sections_document_id_idx 
-ON document_sections(document_id);
-
-CREATE INDEX IF NOT EXISTS document_sections_parent_idx 
-ON document_sections(parent_section_id);
-
-CREATE INDEX IF NOT EXISTS document_sections_embedding_idx 
-ON document_sections USING hnsw (content_embedding vector_cosine_ops)
-WITH (m = 16, ef_construction = 64);
-
--- Table to store parent-child relationships
-CREATE TABLE IF NOT EXISTS chunk_relationships (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    parent_chunk_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    child_chunk_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    relationship_type text DEFAULT 'parent_child',
-    created_at timestamptz DEFAULT now(),
-    UNIQUE(parent_chunk_id, child_chunk_id)
-);
-
--- ============================================================
--- 6. RRF (Reciprocal Rank Fusion) functions
+-- 3. Query helpers
 -- ============================================================
 
--- RRF score calculation function
-CREATE OR REPLACE FUNCTION rrf_score(rank bigint, k int DEFAULT 50)
-RETURNS numeric
-LANGUAGE sql
-IMMUTABLE PARALLEL SAFE
-AS $$
-SELECT COALESCE(1.0 / ($1 + $2), 0.0);
-$$;
-
--- Hybrid search function with BM25 + Vector fusion using RRF
--- This is the main hybrid retrieval function for TenderSync
-CREATE OR REPLACE FUNCTION hybrid_search_documents(
-    query_text text,
-    query_embedding vector(1024),
-    tenant_id uuid,
-    organization_id uuid DEFAULT NULL,
-    bm25_top_k int DEFAULT 50,
-    vector_top_k int DEFAULT 50,
-    rrf_k int DEFAULT 50,
-    final_top_k int DEFAULT 50
-)
-RETURNS TABLE (
-    id bigint,
-    content text,
-    metadata jsonb,
-    rrf_score numeric,
-    bm25_score numeric,
-    vector_similarity numeric,
-    source_type text,
-    rank_position int
-)
-LANGUAGE sql
-STABLE
-AS $$
-WITH 
--- BM25 search results
-bm25_results AS (
-    SELECT 
-        d.id,
-        d.content,
-        d.metadata,
-        ts_rank_cd(d.search_text, plainto_tsquery('english', query_text)) as bm25_score,
-        0 as vector_similarity,
-        'bm25' as source_type,
-        ROW_NUMBER() OVER (ORDER BY ts_rank_cd(d.search_text, plainto_tsquery('english', query_text)) DESC) as source_rank
-    FROM documents d
-    WHERE 
-        d.search_text @@ plainto_tsquery('english', query_text)
-        AND (d.tenant_id = tenant_id OR d.organization_id = organization_id)
-        AND d.embedding IS NOT NULL
-    ORDER BY bm25_score DESC
-    LIMIT bm25_top_k
-),
--- Vector search results
-vector_results AS (
-    SELECT 
-        d.id,
-        d.content,
-        d.metadata,
-        0 as bm25_score,
-        1 - (d.embedding <=> query_embedding) as vector_similarity,
-        'vector' as source_type,
-        ROW_NUMBER() OVER (ORDER BY d.embedding <=> query_embedding) as source_rank
-    FROM documents d
-    WHERE 
-        d.embedding IS NOT NULL
-        AND (d.tenant_id = tenant_id OR d.organization_id = organization_id)
-    ORDER BY d.embedding <=> query_embedding
-    LIMIT vector_top_k
-),
--- Combined results
-combined AS (
-    SELECT * FROM bm25_results
-    UNION ALL
-    SELECT * FROM vector_results
-),
--- RRF fusion
-rrf_combined AS (
-    SELECT 
-        id,
-        content,
-        metadata,
-        bm25_score,
-        vector_similarity,
-        source_type,
-        SUM(rrf_score(source_rank, rrf_k)) as rrf_score
-    FROM combined
-    GROUP BY id, content, metadata, bm25_score, vector_similarity, source_type
-)
--- Final ranked results
-SELECT 
-    id,
-    content,
-    metadata,
-    rrf_score,
-    bm25_score,
-    vector_similarity,
-    source_type,
-    ROW_NUMBER() OVER (ORDER BY rrf_score DESC) as rank_position
-FROM rrf_combined
-ORDER BY rrf_score DESC
-LIMIT final_top_k
-$$;
-
--- ============================================================
--- 7. Section-aware search (for parent-child retrieval)
--- ============================================================
-CREATE OR REPLACE FUNCTION search_with_section_context(
-    query_text text,
-    query_embedding vector(1024),
-    document_id bigint,
-    section_levels int[] DEFAULT ARRAY[1,2],
-    top_k int DEFAULT 10
-)
-RETURNS TABLE (
-    chunk_id bigint,
-    chunk_content text,
-    section_path text[],
-    section_summary text,
-    chunk_similarity numeric,
-    section_similarity numeric
-)
-LANGUAGE sql
-STABLE
-AS $$
-WITH 
--- Find relevant sections
-relevant_sections AS (
-    SELECT 
-        ds.id,
-        ds.title,
-        ds.level,
-        ds.parent_section_id,
-        ds.content,
-        ds.summary,
-        ds.content_embedding,
-        1 - (ds.content_embedding <=> query_embedding) as section_similarity,
-        ARRAY[
-            (SELECT ARRAY_AGG(ds2.title ORDER BY ds2.level)
-             FROM document_sections ds2
-             WHERE ds2.id = ds.id 
-                OR ds2.id = ANY(
-                    SELECT ARRAY_AGG(ds3.id ORDER BY ds3.level DESC)
-                    FROM document_sections ds3
-                    WHERE ds3.parent_section_id = ds.id
-                )
-            )
-        ] as section_path
-    FROM document_sections ds
-    WHERE ds.document_id = document_id
-        AND ds.level = ANY(section_levels)
-    ORDER BY section_similarity DESC
-    LIMIT top_k * 2
-),
--- Find specific chunks within sections
-chunk_matches AS (
-    SELECT 
-        d.id as chunk_id,
-        d.content as chunk_content,
-        rs.section_path,
-        rs.summary as section_summary,
-        1 - (d.embedding <=> query_embedding) as chunk_similarity,
-        rs.section_similarity
-    FROM documents d
-    CROSS JOIN relevant_sections rs
-    WHERE d.id IN (
-        SELECT child_chunk_id 
-        FROM chunk_relationships 
-        WHERE parent_chunk_id IN (SELECT id FROM relevant_sections)
-    ) OR d.id IN (SELECT id FROM relevant_sections)
-)
-SELECT 
-    chunk_id,
-    chunk_content,
-    section_path,
-    section_summary,
-    chunk_similarity,
-    section_similarity
-FROM chunk_matches
-ORDER BY (chunk_similarity + COALESCE(section_similarity, 0)) DESC
-LIMIT top_k
-$$;
-
--- ============================================================
--- 8. Enhanced RLS policies for multi-tenant isolation
--- ============================================================
-
--- Enable RLS on new tables
-ALTER TABLE document_sections ENABLE ROW LEVEL SECURITY;
-ALTER TABLE chunk_relationships ENABLE ROW LEVEL SECURITY;
-
--- Drop existing policies and create enhanced ones
-DROP POLICY IF EXISTS "Users read own documents" ON documents;
-DROP POLICY IF EXISTS "Users insert own documents" ON documents;
-
--- Enhanced document policies with tenant isolation
-CREATE POLICY "Users read own tenant documents" ON documents
-    FOR SELECT
-    TO authenticated
-    USING (
-        (SELECT auth.uid()) = user_id 
-        OR tenant_id IN (
-            SELECT organization_id FROM organization_members 
-            WHERE user_id = auth.uid() AND role != 'viewer'
-        )
-    );
-
-CREATE POLICY "Users insert own tenant documents" ON documents
-    FOR INSERT
-    TO authenticated
-    WITH CHECK (
-        (SELECT auth.uid()) = user_id
-        OR organization_id IN (
-            SELECT organization_id FROM organization_members 
-            WHERE user_id = auth.uid() AND role = 'owner'
-        )
-    );
-
-CREATE POLICY "Users update own tenant documents" ON documents
-    FOR UPDATE
-    TO authenticated
-    USING ((SELECT auth.uid()) = user_id)
-    WITH CHECK ((SELECT auth.uid()) = user_id);
-
--- Policies for document_sections
-CREATE POLICY "Users read own tenant sections" ON document_sections
-    FOR SELECT
-    TO authenticated
-    USING (
-        document_id IN (
-            SELECT d.id FROM documents d
-            WHERE (SELECT auth.uid()) = d.user_id
-            OR d.tenant_id IN (
-                SELECT organization_id FROM organization_members 
-                WHERE user_id = auth.uid()
-            )
-        )
-    );
-
-CREATE POLICY "Users insert own tenant sections" ON document_sections
-    FOR INSERT
-    TO authenticated
-    WITH CHECK (
-        document_id IN (
-            SELECT d.id FROM documents d
-            WHERE d.user_id = auth.uid()
-        )
-    );
-
--- Policies for chunk_relationships
-CREATE POLICY "Users read own tenant chunk relationships" ON chunk_relationships
-    FOR SELECT
-    TO authenticated
-    USING (
-        parent_chunk_id IN (
-            SELECT id FROM documents WHERE user_id = auth.uid()
-        )
-        OR child_chunk_id IN (
-            SELECT id FROM documents WHERE user_id = auth.uid()
-        )
-    );
-
-CREATE POLICY "Users insert own tenant chunk relationships" ON chunk_relationships
-    FOR INSERT
-    TO authenticated
-    WITH CHECK (
-        parent_chunk_id IN (
-            SELECT id FROM documents WHERE user_id = auth.uid()
-        )
-        AND child_chunk_id IN (
-            SELECT id FROM documents WHERE user_id = auth.uid()
-        )
-    );
-
--- ============================================================
--- 9. Update match_documents function for hybrid support
--- ============================================================
--- Keep existing function but enhance with optional hybrid mode
-CREATE OR REPLACE FUNCTION match_documents(
-    query_embedding vector(1024),
-    match_count int DEFAULT 8,
-    filter_user_id uuid DEFAULT NULL,
-    filter_tenant_id uuid DEFAULT NULL,
-    use_hybrid boolean DEFAULT false,
-    query_text text DEFAULT NULL
-)
-RETURNS TABLE (
-    id bigint,
-    content text,
-    metadata jsonb,
-    similarity float,
-    search_type text
-)
+-- Postgres' plainto_tsquery ANDs every term, so natural-language questions
+-- ("What ISO certifications are required?") match almost nothing. Fuse the
+-- lexemes with OR instead; ts_rank_cd still rewards rarer / more matches.
+CREATE OR REPLACE FUNCTION tender_tsquery(query_text text)
+RETURNS tsquery
 LANGUAGE plpgsql
+IMMUTABLE
 AS $$
+DECLARE
+    terms text;
 BEGIN
-    IF use_hybrid AND query_text IS NOT NULL AND filter_tenant_id IS NOT NULL THEN
-        -- Use hybrid search
-        RETURN QUERY
-        SELECT 
-            hs.id,
-            hs.content,
-            hs.metadata,
-            hs.rrf_score::float as similarity,
-            hs.source_type as search_type
-        FROM hybrid_search_documents(
-            query_text,
-            query_embedding,
-            filter_tenant_id,
-            NULL::uuid,
-            50,  -- bm25_top_k
-            50,  -- vector_top_k
-            50,  -- rrf_k
-            match_count
-        ) hs;
-    ELSE
-        -- Use simple vector search (original behavior)
-        RETURN QUERY
-        SELECT
-            documents.id,
-            documents.content,
-            documents.metadata,
-            1 - (documents.embedding <=> query_embedding) AS similarity,
-            'vector' as search_type
-        FROM documents
-        WHERE
-            (filter_user_id IS NULL OR documents.user_id = filter_user_id)
-            AND (filter_tenant_id IS NULL OR documents.tenant_id = filter_tenant_id
-                 OR documents.organization_id = filter_tenant_id)
-            AND documents.embedding IS NOT NULL
-        ORDER BY documents.embedding <=> query_embedding
-        LIMIT match_count;
+    SELECT string_agg(DISTINCT lexeme, ' | ')
+    INTO terms
+    FROM unnest(to_tsvector('english', COALESCE(query_text, '')));
+
+    IF terms IS NULL OR terms = '' THEN
+        RETURN NULL;
     END IF;
+
+    RETURN to_tsquery('english', terms);
+EXCEPTION WHEN others THEN
+    RETURN NULL;
 END;
 $$;
 
--- ============================================================
--- 10. Performance indexes for common query patterns
--- ============================================================
+CREATE OR REPLACE FUNCTION get_user_org_id()
+RETURNS uuid
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+    SELECT org_id FROM org_members WHERE user_id = auth.uid() LIMIT 1;
+$$;
 
--- Composite index for tenant + vector queries
-CREATE INDEX IF NOT EXISTS documents_tenant_embedding_idx 
-ON documents(tenant_id, embedding) 
-WHERE embedding IS NOT NULL;
+-- Deprecated vector-only compatibility function, org scoped.
+DROP FUNCTION IF EXISTS match_documents(vector, integer, jsonb);
+DROP FUNCTION IF EXISTS match_documents(vector, integer, uuid);
+DROP FUNCTION IF EXISTS match_documents(vector, integer, uuid, uuid);
+DROP FUNCTION IF EXISTS match_documents(vector, integer, uuid, uuid, boolean, text);
+CREATE OR REPLACE FUNCTION match_documents(
+    query_embedding vector(1024),
+    match_count integer DEFAULT 8,
+    filter_org_id uuid DEFAULT NULL
+)
+RETURNS TABLE (
+    id uuid,
+    content text,
+    metadata jsonb,
+    similarity double precision,
+    parent_id uuid,
+    document_id uuid,
+    section_path text[],
+    is_parent boolean,
+    contextual_prefix text
+)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT
+        d.id,
+        d.content,
+        d.metadata,
+        (1 - (d.embedding <=> query_embedding))::double precision AS similarity,
+        d.parent_id,
+        d.document_id,
+        d.section_path,
+        d.is_parent,
+        d.contextual_prefix
+    FROM documents d
+    WHERE filter_org_id IS NOT NULL
+      AND d.org_id = filter_org_id
+      AND COALESCE(d.is_parent, false) = false
+      AND d.embedding IS NOT NULL
+    ORDER BY d.embedding <=> query_embedding
+    LIMIT GREATEST(match_count, 0);
+$$;
 
--- Index for metadata queries
-CREATE INDEX IF NOT EXISTS documents_metadata_idx 
-ON documents USING GIN(metadata);
-
--- Index for created_at sorting
-CREATE INDEX IF NOT EXISTS documents_created_at_idx 
-ON documents(created_at DESC);
+DROP FUNCTION IF EXISTS match_documents_org(vector, integer, uuid);
+DROP FUNCTION IF EXISTS match_documents_org(vector, integer, uuid, uuid);
+CREATE OR REPLACE FUNCTION match_documents_org(
+    query_embedding vector(1024),
+    match_count integer DEFAULT 8,
+    filter_org_id uuid DEFAULT NULL,
+    filter_document_id uuid DEFAULT NULL
+)
+RETURNS TABLE (
+    id uuid,
+    content text,
+    metadata jsonb,
+    similarity double precision,
+    parent_id uuid,
+    document_id uuid,
+    section_path text[],
+    is_parent boolean,
+    contextual_prefix text
+)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT
+        d.id,
+        d.content,
+        d.metadata,
+        (1 - (d.embedding <=> query_embedding))::double precision AS similarity,
+        d.parent_id,
+        d.document_id,
+        d.section_path,
+        d.is_parent,
+        d.contextual_prefix
+    FROM documents d
+    WHERE filter_org_id IS NOT NULL
+      AND d.org_id = filter_org_id
+      AND (filter_document_id IS NULL OR d.document_id = filter_document_id)
+      AND COALESCE(d.is_parent, false) = false
+      AND d.embedding IS NOT NULL
+    ORDER BY d.embedding <=> query_embedding
+    LIMIT GREATEST(match_count, 0);
+$$;
 
 -- ============================================================
--- 11. Migration tracking
+-- 4. Hybrid BM25 (Postgres ts_rank_cd) + pgvector + RRF
 -- ============================================================
-INSERT INTO schema_migrations (version, applied_at)
-VALUES ('002_hybrid_search', NOW())
+DROP FUNCTION IF EXISTS hybrid_search_documents(text, vector, uuid, uuid, integer, integer, integer, integer);
+DROP FUNCTION IF EXISTS hybrid_search_documents(text, vector, uuid, uuid, integer, integer, integer, integer, uuid);
+CREATE OR REPLACE FUNCTION hybrid_search_documents(
+    query_text text,
+    query_embedding vector(1024),
+    filter_org_id uuid,
+    filter_document_id uuid DEFAULT NULL,
+    bm25_top_k integer DEFAULT 50,
+    vector_top_k integer DEFAULT 50,
+    rrf_k integer DEFAULT 50,
+    final_top_k integer DEFAULT 8
+)
+RETURNS TABLE (
+    id uuid,
+    content text,
+    metadata jsonb,
+    text_rank double precision,
+    vector_similarity double precision,
+    rrf_score double precision,
+    source_type text,
+    rank_position integer,
+    parent_id uuid,
+    document_id uuid,
+    section_path text[],
+    is_parent boolean,
+    contextual_prefix text
+)
+LANGUAGE sql
+STABLE
+AS $$
+WITH q AS (
+    SELECT tender_tsquery(query_text) AS tsq, query_embedding AS emb
+),
+bm25 AS (
+    SELECT
+        d.id,
+        d.content,
+        d.metadata,
+        ts_rank_cd(d.search_text, q.tsq)::double precision AS text_rank,
+        0::double precision AS vector_similarity,
+        'bm25'::text AS source_type,
+        ROW_NUMBER() OVER (ORDER BY ts_rank_cd(d.search_text, q.tsq) DESC)::integer AS source_rank,
+        d.parent_id,
+        d.document_id,
+        d.section_path,
+        d.is_parent,
+        d.contextual_prefix
+    FROM documents d, q
+    WHERE filter_org_id IS NOT NULL
+      AND d.org_id = filter_org_id
+      AND COALESCE(d.is_parent, false) = false
+      AND d.search_text IS NOT NULL
+      AND q.tsq IS NOT NULL
+      AND d.search_text @@ q.tsq
+      AND (filter_document_id IS NULL OR d.document_id = filter_document_id)
+    ORDER BY text_rank DESC
+    LIMIT GREATEST(bm25_top_k, 0)
+),
+vec AS (
+    SELECT
+        d.id,
+        d.content,
+        d.metadata,
+        0::double precision AS text_rank,
+        (1 - (d.embedding <=> q.emb))::double precision AS vector_similarity,
+        'vector'::text AS source_type,
+        ROW_NUMBER() OVER (ORDER BY d.embedding <=> q.emb)::integer AS source_rank,
+        d.parent_id,
+        d.document_id,
+        d.section_path,
+        d.is_parent,
+        d.contextual_prefix
+    FROM documents d, q
+    WHERE filter_org_id IS NOT NULL
+      AND d.org_id = filter_org_id
+      AND COALESCE(d.is_parent, false) = false
+      AND d.embedding IS NOT NULL
+      AND q.emb IS NOT NULL
+      AND (filter_document_id IS NULL OR d.document_id = filter_document_id)
+    ORDER BY d.embedding <=> q.emb
+    LIMIT GREATEST(vector_top_k, 0)
+),
+combined AS (
+    SELECT * FROM bm25
+    UNION ALL
+    SELECT * FROM vec
+),
+fused AS (
+    SELECT
+        id,
+        content,
+        metadata,
+        MAX(text_rank) AS text_rank,
+        MAX(vector_similarity) AS vector_similarity,
+        SUM(1.0 / (source_rank + GREATEST(rrf_k, 1)))::double precision AS rrf_score,
+        CASE
+            WHEN COUNT(DISTINCT source_type) > 1 THEN 'hybrid'
+            ELSE MIN(source_type)
+        END AS source_type,
+        parent_id,
+        document_id,
+        section_path,
+        is_parent,
+        contextual_prefix
+    FROM combined
+    GROUP BY id, content, metadata, parent_id, document_id, section_path, is_parent, contextual_prefix
+)
+SELECT
+    id,
+    content,
+    metadata,
+    text_rank,
+    vector_similarity,
+    rrf_score,
+    source_type,
+    ROW_NUMBER() OVER (ORDER BY rrf_score DESC, id)::integer AS rank_position,
+    parent_id,
+    document_id,
+    section_path,
+    is_parent,
+    contextual_prefix
+FROM fused
+ORDER BY rrf_score DESC, id
+LIMIT GREATEST(final_top_k, 0);
+$$;
+
+-- ============================================================
+-- 5. Row Level Security (tenant isolation)
+-- ============================================================
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users read own documents" ON documents;
+DROP POLICY IF EXISTS "Users insert own documents" ON documents;
+DROP POLICY IF EXISTS "Users update own documents" ON documents;
+DROP POLICY IF EXISTS "Users read own tenant documents" ON documents;
+DROP POLICY IF EXISTS "Users insert own tenant documents" ON documents;
+DROP POLICY IF EXISTS "Users update own tenant documents" ON documents;
+DROP POLICY IF EXISTS "Orgs read own documents" ON documents;
+DROP POLICY IF EXISTS "Orgs insert own documents" ON documents;
+DROP POLICY IF EXISTS "documents_select_own_org" ON documents;
+DROP POLICY IF EXISTS "documents_insert_own_org" ON documents;
+DROP POLICY IF EXISTS "documents_update_own_org" ON documents;
+DROP POLICY IF EXISTS "documents_delete_own_org" ON documents;
+
+CREATE POLICY "documents_select_own_org" ON documents
+    FOR SELECT TO authenticated
+    USING (org_id = get_user_org_id());
+
+CREATE POLICY "documents_insert_own_org" ON documents
+    FOR INSERT TO authenticated
+    WITH CHECK (org_id = get_user_org_id());
+
+CREATE POLICY "documents_update_own_org" ON documents
+    FOR UPDATE TO authenticated
+    USING (org_id = get_user_org_id())
+    WITH CHECK (org_id = get_user_org_id());
+
+CREATE POLICY "documents_delete_own_org" ON documents
+    FOR DELETE TO authenticated
+    USING (org_id = get_user_org_id());
+
+-- The FastAPI backend uses the service role key, which bypasses RLS.
+-- RLS protects any direct anon/authenticated client access to Supabase.
+
+INSERT INTO schema_migrations (version) VALUES ('002_hybrid_search')
 ON CONFLICT (version) DO NOTHING;

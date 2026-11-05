@@ -7,7 +7,7 @@ Can be extended to support MLflow, Comet, etc.
 
 Usage:
     python -m evaluation.track_experiment \
-        --results evaluation/results/eval_report.json \
+        --results evaluation/results/financebench/eval_report.json \
         --commit abc123 \
         --wandb-project tender-sync-rag-eval
 """

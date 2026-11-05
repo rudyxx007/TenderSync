@@ -9,6 +9,7 @@ from .proposals import router as proposals_router
 from .market import router as market_router
 from .batches import router as batches_router
 from .exports import router as exports_router
+from .rag import router as rag_router
 
 __all__ = [
     "auth_router",
@@ -19,4 +20,5 @@ __all__ = [
     "market_router",
     "batches_router",
     "exports_router",
+    "rag_router",
 ]

@@ -1,471 +1,282 @@
 #!/usr/bin/env python3
-"""
-Ablation Study Runner - Compares different RAG configurations.
+"""Ablation study over the real TenderSync RAG pipeline.
 
-Runs the same evaluation dataset through multiple configurations
-to measure the impact of each component.
+Each configuration invokes ``evaluation.run_evaluation`` as a subprocess, so
+the ablation measures the same retrieval/generation code path as production
+and the main evaluation. The previous version instantiated a retriever without
+a database client, queried with the wrong tenant, and derived metric names from
+a docstring; it could not produce a valid comparison.
 
 Usage:
     python -m evaluation.run_ablation \
-        --dataset evaluation/golden_dataset.json \
-        --output evaluation/results/ablation_report.json \
-        --samples 50
+        --benchmark financebench \
+        --dataset evaluation/seeded/financebench.json \
+        --tenant-id <org-uuid> \
+        --output evaluation/results/financebench/ablation_report.json
+
+The dataset must already be seeded with ``evaluation.ingest_golden``.
 """
 
 import argparse
 import json
 import logging
+import os
+import subprocess
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List
 
-import numpy as np
+BACKEND_DIR = Path(__file__).resolve().parent.parent
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from evaluation.ragas_evaluator import (
-    RAGASEvaluator,
-    load_golden_dataset,
-    EvaluationSample,
-    EvaluationResult,
-)
-from evaluation.pipeline_wrapper import RAGPipelineWrapper
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("ablation")
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-
-# Default ablation configurations
-DEFAULT_CONFIGURATIONS = [
+DEFAULT_CONFIGURATIONS: List[Dict[str, Any]] = [
     {
-        "name": "full_hybrid",
-        "description": "Full hybrid retrieval + reranking (baseline)",
-        "embedding_model": "voyage-4-large",
-        "reranker_model": "voyage-rerank-2",
+        "name": "hybrid_rerank",
+        "description": "Hybrid BM25 + vector with RRF and cross-encoder reranking (baseline)",
         "retrieval_mode": "hybrid",
-        "top_k": 50,
-        "rerank_top_k": 8,
+        "reranker": "voyage-rerank-2",
     },
     {
-        "name": "no_reranker",
-        "description": "Hybrid retrieval without reranking",
-        "embedding_model": "voyage-4-large",
-        "reranker_model": "none",
+        "name": "hybrid_no_rerank",
+        "description": "Hybrid retrieval with RRF only, no cross-encoder reranking",
         "retrieval_mode": "hybrid",
-        "top_k": 8,
-        "rerank_top_k": 8,
-    },
-    {
-        "name": "bm25_only",
-        "description": "BM25 keyword search only",
-        "embedding_model": "voyage-4-large",
-        "reranker_model": "none",
-        "retrieval_mode": "bm25_only",
-        "top_k": 8,
-        "rerank_top_k": 8,
+        "reranker": "none",
     },
     {
         "name": "vector_only",
-        "description": "Vector similarity search only",
-        "embedding_model": "voyage-4-large",
-        "reranker_model": "none",
+        "description": "Dense pgvector retrieval only",
         "retrieval_mode": "vector_only",
-        "top_k": 8,
-        "rerank_top_k": 8,
+        "reranker": "none",
     },
     {
-        "name": "finance_embedding",
-        "description": "Finance-tuned embedding model",
-        "embedding_model": "voyage-finance-2",
-        "reranker_model": "voyage-rerank-2",
-        "retrieval_mode": "hybrid",
-        "top_k": 50,
-        "rerank_top_k": 8,
-    },
-    {
-        "name": "law_embedding",
-        "description": "Law-tuned embedding model",
-        "embedding_model": "voyage-law-2",
-        "reranker_model": "voyage-rerank-2",
-        "retrieval_mode": "hybrid",
-        "top_k": 50,
-        "rerank_top_k": 8,
-    },
-    {
-        "name": "bge_reranker",
-        "description": "BGE reranker instead of Voyage",
-        "embedding_model": "voyage-4-large",
-        "reranker_model": "bge-reranker-v2-m3",
-        "retrieval_mode": "hybrid",
-        "top_k": 50,
-        "rerank_top_k": 8,
-    },
-    {
-        "name": "contextual_off",
-        "description": "Without contextual retrieval (no context prepended)",
-        "embedding_model": "voyage-4-large",
-        "reranker_model": "voyage-rerank-2",
-        "retrieval_mode": "hybrid",
-        "top_k": 50,
-        "rerank_top_k": 8,
-        "contextual_retrieval": False,
+        "name": "bm25_only",
+        "description": "Postgres full-text BM25 retrieval only",
+        "retrieval_mode": "bm25_only",
+        "reranker": "none",
     },
 ]
 
 
-def run_single_config(
-    config: Dict[str, Any],
-    dataset: List[EvaluationSample],
-    tenant_id: str,
-    verbose: bool = False,
-) -> Dict[str, Any]:
-    """
-    Run evaluation with a single configuration.
-    
-    Returns dict with config name, metrics, and latency stats.
-    """
-    logger.info(f"\n{'='*60}")
-    logger.info(f"Running configuration: {config['name']}")
-    logger.info(f"Description: {config['description']}")
-    logger.info(f"{'='*60}")
-    
-    start_time = time.time()
-    
-    # Initialize pipeline with this config
-    pipeline = RAGPipelineWrapper(
-        embedding_model=config["embedding_model"],
-        reranker_model=config["reranker_model"],
-        retrieval_mode=config["retrieval_mode"],
-        top_k=config["top_k"],
-        rerank_top_k=config.get("rerank_top_k", 8),
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run a real RAG ablation study")
+    parser.add_argument(
+        "--benchmark",
+        required=True,
+        choices=["financebench", "cuad", "austender"],
+        help="Benchmark to ablate; exactly one source per run",
     )
-    
-    # Initialize evaluator
-    evaluator = RAGASEvaluator()
-    
-    # Run evaluation on each sample
-    results: List[EvaluationResult] = []
-    total_latency = 0
-    
-    for i, sample in enumerate(dataset):
-        if verbose:
-            logger.info(f"  [{i+1}/{len(dataset)}] {sample.id}: {sample.query[:50]}...")
-        
-        sample_start = time.time()
-        
-        # Query pipeline
-        pipeline_result = pipeline.query(
-            query=sample.query,
-            tenant_id=tenant_id,
+    parser.add_argument("--dataset", "-d", required=True)
+    parser.add_argument("--output", "-o", required=True)
+    parser.add_argument("--tenant-id", "-t", required=True)
+    parser.add_argument("--samples", "-n", type=int, default=0, help="0 = entire dataset")
+    parser.add_argument("--embedding-model", default=os.getenv("EMBEDDING_MODEL", "voyage-4-large"))
+    parser.add_argument("--baseline", default="hybrid_rerank")
+    parser.add_argument("--configs", default=None, help="Optional JSON list of configuration overrides")
+    parser.add_argument("--verbose", "-v", action="store_true")
+    return parser.parse_args()
+
+
+def load_configs(path: str | None) -> List[Dict[str, Any]]:
+    if not path:
+        return DEFAULT_CONFIGURATIONS
+    with open(path, encoding="utf-8") as handle:
+        configs = json.load(handle)
+    if not isinstance(configs, list) or not configs:
+        raise ValueError("--configs must contain a non-empty JSON list")
+    required = {"name", "retrieval_mode", "reranker"}
+    for config in configs:
+        missing = required - set(config)
+        if missing:
+            raise ValueError(f"Configuration {config.get('name', '?')} missing {sorted(missing)}")
+    return configs
+
+
+def run_configuration(
+    config: Dict[str, Any],
+    benchmark: str,
+    dataset_path: Path,
+    tenant_id: str,
+    samples: int,
+    embedding_model: str,
+    run_dir: Path,
+    verbose: bool,
+) -> Dict[str, Any]:
+    report_path = run_dir / f"{config['name']}.json"
+    command = [
+        sys.executable,
+        "-m",
+        "evaluation.run_evaluation",
+        "--benchmark",
+        benchmark,
+        "--dataset",
+        str(dataset_path),
+        "--output",
+        str(report_path),
+        "--tenant-id",
+        tenant_id,
+        "--samples",
+        str(samples),
+        "--embedding-model",
+        embedding_model,
+        "--reranker",
+        config["reranker"],
+        "--retrieval-mode",
+        config["retrieval_mode"],
+    ]
+    if verbose:
+        command.append("--verbose")
+
+    logger.info("Running %s: %s", config["name"], config["description"])
+    completed = subprocess.run(command, cwd=BACKEND_DIR)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"Configuration {config['name']} failed with exit code {completed.returncode}. "
+            f"See {report_path}."
         )
-        
-        # Evaluate
-        eval_result = evaluator.evaluate_sample(
-            sample=sample,
-            generated_answer=pipeline_result["answer"],
-            retrieved_chunks=pipeline_result["retrieved_chunks"],
-            ground_truth_chunks=sample.relevant_chunks,
+
+    with open(report_path, encoding="utf-8") as handle:
+        report = json.load(handle)
+
+    if not report.get("total_samples"):
+        raise RuntimeError(f"Configuration {config['name']} evaluated zero samples")
+    if sum(s.get("num_retrieved_chunks", 0) for s in report.get("samples", [])) == 0:
+        raise RuntimeError(
+            f"Configuration {config['name']} retrieved zero chunks for every sample. "
+            "Seed the tenant with evaluation.ingest_golden first."
         )
-        
-        results.append(eval_result)
-        total_latency += (time.time() - sample_start) * 1000
-    
-    # Aggregate metrics
-    metrics = {}
-    for metric_name in evaluator._compute_context_recall.__doc__.split() or ["context_recall", "context_precision", "faithfulness", "answer_relevance"]:
-        # Get all values for this metric
-        values = [r.metrics.get(metric_name, 0) for r in results]
-        if values:
-            metrics[metric_name] = {
-                "mean": float(np.mean(values)),
-                "std": float(np.std(values)),
-                "min": float(np.min(values)),
-                "max": float(np.max(values)),
-                "median": float(np.median(values)),
-            }
-    
-    # Also collect compliance metrics if present
-    for sample, result in zip(dataset, results):
-        for key in sample.metadata or {}:
-            if key not in metrics:
-                metrics[key] = {
-                    "mean": 0.0,
-                    "std": 0.0,
-                    "min": 0.0,
-                    "max": 0.0,
-                    "median": 0.0,
-                }
-    
-    elapsed = time.time() - start_time
-    
+
     return {
-        "config": config,
-        "metrics": metrics,
-        "num_samples": len(dataset),
-        "total_latency_ms": total_latency,
-        "avg_latency_ms": total_latency / len(dataset) if dataset else 0,
-        "elapsed_seconds": elapsed,
-        "timestamp": datetime.now().isoformat(),
+        "name": config["name"],
+        "description": config["description"],
+        "retrieval_mode": config["retrieval_mode"],
+        "reranker_model": config["reranker"],
+        "metrics": report["metrics"],
+        "num_samples": report["total_samples"],
+        "elapsed_seconds": report.get("elapsed_seconds"),
+        "errors": report.get("errors", 0),
     }
 
 
-def compute_ablation_comparison(
-    all_results: List[Dict[str, Any]],
-    baseline_name: str = "full_hybrid",
-) -> Dict[str, Any]:
-    """
-    Compute comparison against baseline.
-    
-    Shows delta for each metric for each configuration vs baseline.
-    """
-    # Find baseline
-    baseline = None
-    for result in all_results:
-        if result["config"]["name"] == baseline_name:
-            baseline = result
-            break
-    
+def compare(results: List[Dict[str, Any]], baseline_name: str) -> Dict[str, Any]:
+    baseline = next((r for r in results if r["name"] == baseline_name), None)
     if baseline is None:
-        logger.warning(f"Baseline '{baseline_name}' not found in results")
-        return {"error": f"Baseline '{baseline_name}' not found"}
-    
-    baseline_metrics = baseline.get("metrics", {})
-    
+        raise ValueError(f"Baseline configuration not found: {baseline_name}")
+
     comparison = {
         "baseline": baseline_name,
-        "baseline_metrics": {
-            k: v["mean"] for k, v in baseline_metrics.items()
-        },
+        "baseline_metrics": {k: v["mean"] for k, v in baseline["metrics"].items()},
         "configs": [],
     }
-    
-    for result in all_results:
-        config_name = result["config"]["name"]
-        if config_name == baseline_name:
+
+    for result in results:
+        if result["name"] == baseline_name:
             continue
-        
-        config_metrics = result.get("metrics", {})
         deltas = {}
-        
-        for metric_name, baseline_value in baseline_metrics.items():
-            actual_value = config_metrics.get(metric_name, {}).get("mean", 0)
-            deltas[metric_name] = {
-                "delta": actual_value - baseline_value,
-                "delta_pct": ((actual_value - baseline_value) / baseline_value * 100) if baseline_value else 0,
-                "actual": actual_value,
-                "baseline": baseline_value,
-                "improved": actual_value > baseline_value,
+        for metric, baseline_values in baseline["metrics"].items():
+            actual = result["metrics"].get(metric, {}).get("mean", 0.0)
+            base = baseline_values.get("mean", 0.0)
+            deltas[metric] = {
+                "actual": actual,
+                "baseline": base,
+                "delta": actual - base,
+                "delta_pct": ((actual - base) / base * 100) if base else None,
             }
-        
-        comparison["configs"].append({
-            "name": config_name,
-            "description": result["config"]["description"],
-            "metrics": {
-                k: v["mean"] for k, v in config_metrics.items()
-            },
-            "deltas": deltas,
-            "avg_latency_ms": result.get("avg_latency_ms", 0),
-            "total_latency_ms": result.get("total_latency_ms", 0),
-        })
-    
+        comparison["configs"].append(
+            {
+                "name": result["name"],
+                "description": result["description"],
+                "metrics": {k: v["mean"] for k, v in result["metrics"].items()},
+                "deltas": deltas,
+                "elapsed_seconds": result.get("elapsed_seconds"),
+            }
+        )
     return comparison
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Run ablation study comparing RAG configurations"
-    )
-    parser.add_argument(
-        "--dataset", "-d",
-        type=str,
-        required=True,
-        help="Path to golden dataset JSON"
-    )
-    parser.add_argument(
-        "--output", "-o",
-        type=str,
-        required=True,
-        help="Path for output ablation report"
-    )
-    parser.add_argument(
-        "--samples", "-n",
-        type=int,
-        default=0,
-        help="Number of samples (0=all)"
-    )
-    parser.add_argument(
-        "--configs", "-c",
-        type=str,
-        default=None,
-        help="Path to custom configs JSON (overrides defaults)"
-    )
-    parser.add_argument(
-        "--baseline",
-        type=str,
-        default="full_hybrid",
-        help="Baseline configuration name for comparison"
-    )
-    parser.add_argument(
-        "--tenant-id", "-t",
-        type=str,
-        default="test-tenant",
-        help="Tenant ID for retrieval"
-    )
-    parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Verbose output"
-    )
-    parser.add_argument(
-        "--skip-failed",
-        action="store_true",
-        help="Continue if a config fails"
-    )
-    
-    args = parser.parse_args()
-    
-    # Load dataset
+def print_summary(report: Dict[str, Any]) -> None:
+    results = report["configurations"]
+    metric_names = sorted({name for result in results for name in result["metrics"]})
+    print("\n" + "=" * 88)
+    print("RAG ABLATION STUDY")
+    print("=" * 88)
+    print(f"Samples: {report['num_samples']}    Baseline: {report['baseline']}")
+    print("-" * 88)
+    header = f"{'Configuration':<22}" + "".join(f"{name:>15}" for name in metric_names)
+    print(header)
+    print("-" * len(header))
+    for result in results:
+        row = f"{result['name']:<22}"
+        for name in metric_names:
+            value = result["metrics"].get(name, {}).get("mean")
+            row += f"{(f'{value * 100:.2f}%' if value is not None else 'n/a'):>15}"
+        print(row)
+    print("=" * 88)
+
+
+def main() -> int:
+    args = parse_args()
     dataset_path = Path(args.dataset)
     if not dataset_path.exists():
-        logger.error(f"Dataset not found: {args.dataset}")
-        sys.exit(1)
-    
-    dataset = load_golden_dataset(str(dataset_path))
-    logger.info(f"Loaded {len(dataset)} samples")
-    
-    if args.samples > 0 and args.samples < len(dataset):
-        import random
-        random.seed(42)
-        dataset = random.sample(dataset, args.samples)
-        logger.info(f"Sampled to {len(dataset)} samples")
-    
-    # Load configurations
-    if args.configs and Path(args.configs).exists():
-        with open(args.configs) as f:
-            configs = json.load(f)
-        logger.info(f"Loaded {len(configs)} custom configurations")
-    else:
-        configs = DEFAULT_CONFIGURATIONS
-        logger.info(f"Using {len(configs)} default configurations")
-    
-    # Run ablation
-    all_results = []
-    
-    for config in configs:
-        try:
-            result = run_single_config(
-                config=config,
-                dataset=dataset,
-                tenant_id=args.tenant_id,
-                verbose=args.verbose,
-            )
-            all_results.append(result)
-        except Exception as e:
-            logger.error(f"Config '{config['name']}' failed: {e}")
-            if not args.skip_failed:
-                sys.exit(1)
-    
-    # Compute comparison
-    comparison = compute_ablation_comparison(
-        all_results, 
-        baseline_name=args.baseline
-    )
-    
-    # Build final report
-    report = {
-        "description": "Ablation study comparing RAG pipeline configurations",
-        "dataset": str(dataset_path),
-        "num_samples": len(dataset),
-        "baseline": args.baseline,
-        "timestamp": datetime.now().isoformat(),
-        "configurations": [
-            {
-                "name": r["config"]["name"],
-                "description": r["config"]["description"],
-                "embedding_model": r["config"]["embedding_model"],
-                "reranker_model": r["config"]["reranker_model"],
-                "retrieval_mode": r["config"]["retrieval_mode"],
-                "metrics": r["metrics"],
-                "latency_ms": r["avg_latency_ms"],
-            }
-            for r in all_results
-        ],
-        "comparison": comparison,
-        "configuration_results": all_results,
-    }
-    
-    # Save report
+        logger.error("Dataset not found: %s", dataset_path)
+        return 2
+    if not os.getenv("SUPABASE_URL") or not (
+        os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
+    ):
+        logger.error("SUPABASE_URL and SUPABASE_SECRET_KEY are required to run an ablation.")
+        return 2
+
+    try:
+        configs = load_configs(args.configs)
+    except (ValueError, json.JSONDecodeError) as exc:
+        logger.error("%s", exc)
+        return 2
+
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    with open(output_path, 'w') as f:
-        json.dump(report, f, indent=2)
-    
-    logger.info(f"Ablation report saved to {args.output}")
-    
-    # Print summary
-    print("\n" + "=" * 80)
-    print("ABLATION STUDY RESULTS")
-    print("=" * 80)
-    print(f"Dataset: {args.dataset}")
-    print(f"Samples: {len(dataset)}")
-    print(f"Baseline: {args.baseline}")
-    print()
-    
-    print("Metrics by configuration:")
-    print("-" * 80)
-    
-    if all_results:
-        first = all_results[0]
-        metric_names = list(first.get("metrics", {}).keys())
-        
-        # Header
-        header = f"{'Config':<20}"
-        for m in metric_names:
-            header += f" {m:>12}"
-        header += f" {'Latency':>10}"
-        print(header)
-        print("-" * len(header))
-        
-        # Rows
-        for result in all_results:
-            row = f"{result['config']['name']:<20}"
-            for m in metric_names:
-                val = result.get("metrics", {}).get(m, {}).get("mean", 0)
-                row += f" {val*100:>11.2f}%"
-            row += f" {result.get('avg_latency_ms', 0):>8.1f}ms"
-            print(row)
-        
-        print("-" * len(header))
-        print()
-        
-        # Comparison
-        if comparison.get("configs"):
-            print(f"Comparison vs baseline '{args.baseline}':")
-            print("-" * 80)
-            
-            for config_comparison in comparison["configs"]:
-                print(f"\n  {config_comparison['name']}:")
-                print(f"    {config_comparison['description']}")
-                for metric_name, delta_data in config_comparison["deltas"].items():
-                    sign = "+" if delta_data["improved"] else ""
-                    delta_pct = delta_data["delta_pct"]
-                    print(f"    {metric_name}: {sign}{delta_pct:.2f}% "
-                          f"(Δ={delta_data['delta']*100:+.2f}pp, "
-                          f"actual={delta_data['actual']*100:.2f}%, "
-                          f"baseline={delta_data['baseline']*100:.2f}%)")
-            
-            print()
-    
-    print("=" * 80)
-    print(f"Report saved to: {args.output}")
+    run_dir = output_path.parent / "ablation_runs"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    for config in configs:
+        try:
+            results.append(
+                run_configuration(
+                    config=config,
+                    benchmark=args.benchmark,
+                    dataset_path=dataset_path,
+                    tenant_id=args.tenant_id,
+                    samples=args.samples,
+                    embedding_model=args.embedding_model,
+                    run_dir=run_dir,
+                    verbose=args.verbose,
+                )
+            )
+        except Exception as exc:
+            logger.error("Ablation configuration failed: %s", exc)
+            return 1
+
+    report = {
+        "description": "Ablation study over the real TenderSync hybrid RAG pipeline",
+        "benchmark": args.benchmark,
+        "dataset": str(dataset_path),
+        "num_samples": results[0]["num_samples"],
+        "baseline": args.baseline,
+        "embedding_model": args.embedding_model,
+        "timestamp": datetime.now().isoformat(),
+        "configurations": results,
+        "comparison": compare(results, args.baseline),
+    }
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(report, handle, indent=2)
+
+    print_summary(report)
+    logger.info("Ablation report written to %s", output_path)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

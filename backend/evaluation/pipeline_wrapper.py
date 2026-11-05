@@ -1,21 +1,36 @@
-"""
-RAG Pipeline Wrapper - Interface to the RAG pipeline for evaluation.
+"""Adapter between the evaluation harness and the TenderSync RAG pipeline.
 
-Provides a clean API for the evaluation framework to interact with
-the actual RAG pipeline without coupling to implementation details.
+Two modes:
+
+* ``api_base`` set: HTTP against a running FastAPI instance.
+* ``api_base`` unset: in-process call to ``rag_service.answer_query`` using
+  Supabase, the configured embedder/reranker and Groq.
+
+The previous implementation instantiated a ``HybridRetriever`` with no database
+client, whose placeholder methods always returned ``[]``. Every metric was
+therefore computed over zero retrieved chunks, which is exactly why the report
+showed 0.00% across the board.
 """
 
+import logging
 import os
 import time
-from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 import requests
+
+import rag_service
+
+logger = logging.getLogger(__name__)
+
+
+class PipelineConfigurationError(RuntimeError):
+    """Raised when the harness cannot reach a real pipeline."""
 
 
 @dataclass
 class RAGPipelineResult:
-    """Result from a RAG pipeline query."""
     query: str
     answer: str
     retrieved_chunks: List[Dict[str, Any]]
@@ -25,13 +40,6 @@ class RAGPipelineResult:
 
 
 class RAGPipelineWrapper:
-    """
-    Wrapper around the RAG pipeline for evaluation purposes.
-    
-    Supports both direct API calls to the running service and
-    direct instantiation of pipeline components.
-    """
-    
     def __init__(
         self,
         api_base: Optional[str] = None,
@@ -42,273 +50,217 @@ class RAGPipelineWrapper:
         rerank_top_k: int = 8,
         tenant_id: Optional[str] = None,
     ):
-        """
-        Initialize the wrapper.
-        
-        Args:
-            api_base: Base URL of the RAG service API (optional)
-            embedding_model: Embedding model name
-            reranker_model: Reranker model name
-            retrieval_mode: 'hybrid', 'bm25_only', or 'vector_only'
-            top_k: Number of chunks to retrieve
-            rerank_top_k: Number of chunks after reranking
-            tenant_id: Tenant ID for multi-tenant isolation
-        """
-        self.api_base = api_base
+        self.api_base = api_base.rstrip("/") if api_base else None
         self.embedding_model = embedding_model
         self.reranker_model = reranker_model
         self.retrieval_mode = retrieval_mode
         self.top_k = top_k
         self.rerank_top_k = rerank_top_k
         self.tenant_id = tenant_id or os.getenv("EVAL_TENANT_ID")
-        
-        # Lazy-initialized pipeline components
-        self._pipeline = None
-        self._session = None
-    
-    def _get_session(self) -> requests.Session:
-        """Get or create HTTP session."""
+
+        self._supabase = None
+        self._embedder = None
+        self._reranker = None
+        self._groq = None
+        self._session: Optional[requests.Session] = None
+
+    # ------------------------------------------------------------------
+    # Resources
+    # ------------------------------------------------------------------
+    def _session_or_create(self) -> requests.Session:
         if self._session is None:
             self._session = requests.Session()
-            self._session.headers.update({
-                "Content-Type": "application/json",
-            })
-            # Add auth if available
+            self._session.headers["Content-Type"] = "application/json"
             api_key = os.getenv("RAG_SERVICE_API_KEY")
             if api_key:
                 self._session.headers["Authorization"] = f"Bearer {api_key}"
         return self._session
-    
+
+    def _ensure_direct(self) -> None:
+        if self._supabase is not None:
+            return
+
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
+        if not url or not key:
+            raise PipelineConfigurationError(
+                "Direct evaluation needs SUPABASE_URL and SUPABASE_SECRET_KEY. "
+                "Set them in backend/.env, or pass --api-base for a running service."
+            )
+
+        from supabase import create_client
+
+        self._supabase = create_client(url, key)
+        try:
+            self._embedder = rag_service.build_embedder(self.embedding_model)
+        except Exception as exc:
+            raise PipelineConfigurationError(f"Embedding provider unavailable: {exc}") from exc
+        self._reranker = rag_service.build_reranker(self.reranker_model)
+        try:
+            self._groq = rag_service.build_groq_client()
+        except Exception as exc:
+            raise PipelineConfigurationError(f"Answer generation unavailable: {exc}") from exc
+
+    @property
+    def embedder(self):
+        if self.api_base:
+            return None
+        self._ensure_direct()
+        return self._embedder
+
+    # ------------------------------------------------------------------
+    # Query
+    # ------------------------------------------------------------------
     def query(
         self,
         query: str,
         tenant_id: Optional[str] = None,
         organization_id: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
+        document_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Execute a query through the RAG pipeline.
-        
-        Args:
-            query: The user query
-            tenant_id: Tenant ID (overrides instance value)
-            organization_id: Organization ID for org-level access
-            filters: Optional filters for retrieval
-            
-        Returns:
-            Dict with answer, retrieved_chunks, latency, metadata
-        """
-        tenant_id = tenant_id or self.tenant_id
-        
+        org_id = tenant_id or organization_id or self.tenant_id
+        if not org_id:
+            raise PipelineConfigurationError(
+                "tenant/org id is required for evaluation. Pass --tenant-id "
+                "or set EVAL_TENANT_ID."
+            )
+
         if self.api_base:
-            return self._query_via_api(
-                query, tenant_id, organization_id, filters
-            )
-        else:
-            return self._query_direct(query, tenant_id, organization_id, filters)
-    
-    def _query_via_api(
-        self,
-        query: str,
-        tenant_id: str,
-        organization_id: Optional[str],
-        filters: Optional[Dict[str, Any]],
+            return self._query_via_api(query, org_id, document_id)
+        return self._query_direct(query, org_id, document_id)
+
+    def _query_direct(
+        self, query: str, org_id: str, document_id: Optional[str]
     ) -> Dict[str, Any]:
-        """Query via HTTP API."""
-        start_time = time.time()
-        
-        session = self._get_session()
-        
-        payload = {
-            "query": query,
-            "tenant_id": tenant_id,
-            "top_k": self.top_k,
-            "retrieval_mode": self.retrieval_mode,
-        }
-        
-        if organization_id:
-            payload["organization_id"] = organization_id
-        
-        if filters:
-            payload["filters"] = filters
-        
-        try:
-            response = session.post(
-                f"{self.api_base}/api/v1/rag/query",
-                json=payload,
-                timeout=30,
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-        except requests.RequestException as e:
-            logger.warning(f"API query failed: {e}")
-            result = {
-                "answer": "",
-                "retrieved_chunks": [],
-                "error": str(e),
+        self._ensure_direct()
+        started = time.time()
+
+        result = rag_service.answer_query(
+            supabase_client=self._supabase,
+            org_id=org_id,
+            query=query,
+            document_id=document_id,
+            groq_client=self._groq,
+            embedder=self._embedder,
+            reranker=self._reranker,
+            top_k=self.top_k,
+            retrieval_mode=self.retrieval_mode,
+        )
+
+        # Evaluate the exact passages handed to the generator (parents included).
+        retrieved = [
+            {
+                "id": item["chunk_id"],
+                "content": item["text"],
+                "score": item.get("score", 0.0),
+                "metadata": {
+                    "section_path": item.get("section_path", []),
+                    "parent_id": item.get("parent_id"),
+                    "document_id": item.get("document_id"),
+                },
             }
-        
-        latency_ms = (time.time() - start_time) * 1000
-        
+            for item in result.get("context", [])
+        ]
+
         return {
             "query": query,
             "answer": result.get("answer", ""),
-            "retrieved_chunks": result.get("retrieved_chunks", []),
+            "retrieved_chunks": retrieved,
+            "context": result.get("context", []),
+            "citations": result.get("citations", []),
+            "verification": result.get("verification"),
             "metadata": {
+                "mode": "direct",
                 "retrieval_mode": self.retrieval_mode,
                 "embedding_model": self.embedding_model,
                 "reranker_model": self.reranker_model,
-                "api_response_time_ms": result.get("latency_ms", latency_ms),
+                "document_id": document_id,
+                "num_chunks_retrieved": len(retrieved),
             },
-            "latency_ms": latency_ms,
+            "latency_ms": (time.time() - started) * 1000,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
-    
-    def _query_direct(
-        self,
-        query: str,
-        tenant_id: str,
-        organization_id: Optional[str],
-        filters: Optional[Dict[str, Any]],
+
+    def _query_via_api(
+        self, query: str, org_id: str, document_id: Optional[str]
     ) -> Dict[str, Any]:
-        """Query directly using pipeline components.
-        
-        For evaluation purposes without a running backend, this performs
-        embedding + retrieval only. The 'answer' field is left empty
-        since LLM generation requires additional API calls.
-        """
-        if self._pipeline is None:
-            from backend.services.voyage_embeddings import VoyageEmbeddingService
-            from backend.services.hybrid_retriever import HybridSearchConfig, HybridRetriever
-            
-            # Initialize pipeline components
-            embedder = VoyageEmbeddingService(
-                model=self.embedding_model,
+        started = time.time()
+        payload = {
+            "query": query,
+            "tenant_id": org_id,
+            "top_k": self.top_k,
+            "retrieval_mode": self.retrieval_mode,
+        }
+        if document_id:
+            payload["document_id"] = document_id
+
+        session = self._session_or_create()
+        try:
+            response = session.post(
+                f"{self.api_base}/api/rag/query", json=payload, timeout=120
             )
-            
-            config = HybridSearchConfig(
-                bm25_top_k=self.top_k * 5,
-                vector_top_k=self.top_k * 5,
-                fusion_top_k=self.top_k * 5,
-                final_top_k=self.top_k,
-            )
-            
-            retriever = HybridRetriever(
-                embedding_service=embedder,
-                config=config,
-            )
-            
-            self._pipeline = {
-                "embedder": embedder,
-                "retriever": retriever,
+            response.raise_for_status()
+            result = response.json()
+        except requests.RequestException as exc:
+            logger.warning("API query failed: %s", exc)
+            result = {"answer": "", "context": [], "error": str(exc)}
+
+        retrieved = [
+            {
+                "id": item.get("chunk_id"),
+                "content": item.get("text", ""),
+                "score": item.get("score", 0.0),
+                "metadata": {"section_path": item.get("section_path", [])},
             }
-        
-        start_time = time.time()
-        
-        # Embed query
-        query_embedding = self._pipeline["embedder"].embed_query(query)
-        
-        # Retrieve - since we don't have a DB connection, return empty
-        # In production with Supabase, this would query the actual database
-        search_results = self._pipeline["retriever"].search(
-            query=query,
-            tenant_id=tenant_id,
-            organization_id=organization_id,
-            top_k=self.top_k,
-        )
-        
-        # Convert to chunk format
-        retrieved_chunks = []
-        for doc in search_results:
-            retrieved_chunks.append({
-                "id": doc.id,
-                "content": doc.content,
-                "score": doc.score,
-                "source": doc.source.value,
-                "rank": doc.rank,
-                "metadata": doc.metadata or {},
-            })
-        
-        latency_ms = (time.time() - start_time) * 1000
-        
-        # No answer generation (would need LLM API call)
-        answer = ""
-        
+            for item in result.get("context", [])
+        ]
+
+        latency_ms = (time.time() - started) * 1000
         return {
             "query": query,
-            "answer": answer,
-            "retrieved_chunks": retrieved_chunks,
+            "answer": result.get("answer", ""),
+            "retrieved_chunks": retrieved,
+            "context": result.get("context", []),
+            "verification": result.get("verification"),
             "metadata": {
+                "mode": "api",
                 "retrieval_mode": self.retrieval_mode,
                 "embedding_model": self.embedding_model,
                 "reranker_model": self.reranker_model,
-                "num_chunks_retrieved": len(retrieved_chunks),
+                "error": result.get("error"),
             },
             "latency_ms": latency_ms,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
-    
+
+    # ------------------------------------------------------------------
+    # Health / cleanup
+    # ------------------------------------------------------------------
     def health_check(self) -> bool:
-        """Check if the RAG service is healthy."""
-        if not self.api_base:
-            return True  # Direct mode doesn't need health check
-        
-        try:
-            session = self._get_session()
-            response = session.get(
-                f"{self.api_base}/health",
-                timeout=5,
-            )
-            return response.status_code == 200
-        except Exception:
-            return False
-    
-    def close(self):
-        """Close resources."""
+        if self.api_base:
+            try:
+                response = self._session_or_create().get(
+                    f"{self.api_base}/api/rag/health", timeout=10
+                )
+                return response.status_code == 200
+            except Exception:
+                return False
+        return bool(
+            os.getenv("SUPABASE_URL")
+            and (os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_KEY"))
+        )
+
+    def close(self) -> None:
         if self._session:
             self._session.close()
             self._session = None
 
 
-# For backwards compatibility
-class EvaluationPipeline:
-    """Legacy compatibility class."""
-    
-    def __init__(self, **kwargs):
-        self.wrapper = RAGPipelineWrapper(**kwargs)
-    
-    def query(self, query: str, **kwargs) -> Dict[str, Any]:
-        return self.wrapper.query(query, **kwargs)
-    
-    def evaluate(self, samples: List, tenant_id: str) -> List[Dict]:
-        """Run evaluation on samples."""
-        results = []
-        for sample in samples:
-            result = self.wrapper.query(
-                query=sample.query,
-                tenant_id=tenant_id,
-            )
-            results.append({
-                "sample": sample,
-                "result": result,
-            })
-        return results
-
-
-if __name__ == "__main__":
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    
-    # Quick test
-    wrapper = RAGPipelineWrapper(
-        embedding_model="voyage-law-2",
-        retrieval_mode="hybrid",
-    )
-    
-    print(f"Pipeline wrapper initialized:")
-    print(f"  API base: {wrapper.api_base or 'direct mode'}")
-    print(f"  Embedding: {wrapper.embedding_model}")
-    print(f"  Reranker: {wrapper.reranker_model}")
-    print(f"  Retrieval: {wrapper.retrieval_mode}")
-    print(f"  Top-k: {wrapper.top_k}")
+# Backwards-compatible alias.
+class EvaluationPipeline(RAGPipelineWrapper):
+    def evaluate(self, samples: List, tenant_id: str) -> List[Dict[str, Any]]:
+        return [
+            {"sample": sample, "result": self.query(sample.query, tenant_id=tenant_id)}
+            for sample in samples
+        ]
