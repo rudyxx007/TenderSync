@@ -1,0 +1,5 @@
+# Optional RAGAS judge layer. Keep this out of the offline CI gate.
+# Install with: pip install -r requirements-ragas.txt
+-r requirements-eval.txt
+ragas>=0.2.14,<0.4
+langchain-openai>=0.2

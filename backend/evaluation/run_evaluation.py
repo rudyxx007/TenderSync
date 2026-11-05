@@ -32,6 +32,7 @@ import os
 import random
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -48,11 +49,13 @@ except ImportError:
 import rag_service
 from evaluation.check_thresholds import check_thresholds, load_thresholds
 from evaluation.pipeline_wrapper import PipelineConfigurationError, RAGPipelineWrapper
+from evaluation.ragas_optional import run_ragas
 from evaluation.ragas_evaluator import (
     RAGASEvaluator,
     RAGASPipelineEvaluator,
     load_golden_dataset,
 )
+from evaluation.trulens_optional import TruLensTracer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,6 +105,21 @@ def parse_args():
         "--fail-on-thresholds",
         action="store_true",
         help="Exit non-zero when any required metric misses its minimum (use in CI)",
+    )
+    parser.add_argument(
+        "--ragas",
+        action="store_true",
+        help="Add an optional LLM-judge RAGAS pass to the report",
+    )
+    parser.add_argument(
+        "--ragas-output",
+        default=None,
+        help="Optional path for ragas_report.json (defaults beside the evaluation report)",
+    )
+    parser.add_argument(
+        "--trulens",
+        action="store_true",
+        help="Record retrieve/generate calls with optional TruLens instrumentation",
     )
     parser.add_argument("--verbose", "-v", action="store_true")
     return parser.parse_args()
@@ -191,17 +209,34 @@ def main() -> int:
         logger.error("%s", exc)
         return 2
 
+    tracer = None
+    if args.trulens:
+        try:
+            tracer = TruLensTracer(
+                wrapper,
+                app_name="TenderSync RAG Evaluation",
+                app_version=f"{args.benchmark}-{args.embedding_model}",
+            )
+        except Exception as exc:
+            logger.error("%s", exc)
+            wrapper.close()
+            return 2
+
     evaluator = RAGASEvaluator(embedding_service=embedder)
-    pipeline_evaluator = RAGASPipelineEvaluator(evaluator=evaluator, rag_pipeline=wrapper)
+    active_pipeline = tracer.pipeline if tracer else wrapper
+    pipeline_evaluator = RAGASPipelineEvaluator(
+        evaluator=evaluator, rag_pipeline=active_pipeline
+    )
 
     logger.info("Starting evaluation...")
     started = time.monotonic()
-    result = pipeline_evaluator.evaluate_dataset(
-        dataset=dataset,
-        tenant_id=args.tenant_id,
-        run_rag_pipeline=True,
-        verbose=args.verbose,
-    )
+    with (tracer if tracer else nullcontext()):
+        result = pipeline_evaluator.evaluate_dataset(
+            dataset=dataset,
+            tenant_id=args.tenant_id,
+            run_rag_pipeline=True,
+            verbose=args.verbose,
+        )
 
     report = {
         "benchmark": args.benchmark,
@@ -214,6 +249,8 @@ def main() -> int:
             "retrieval_mode": args.retrieval_mode,
             "top_k": args.top_k,
             "samples_requested": args.samples or len(dataset),
+            "trulens": args.trulens,
+            "ragas": args.ragas,
         },
         "total_samples": result.total_samples,
         "elapsed_seconds": round(time.monotonic() - started, 3),
@@ -231,6 +268,24 @@ def main() -> int:
         else Path(__file__).parent / "results" / args.benchmark / "eval_report.json"
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    ragas_failed = False
+    if args.ragas:
+        ragas_path = (
+            Path(args.ragas_output)
+            if args.ragas_output
+            else output_path.with_name("ragas_report.json")
+        )
+        try:
+            report["ragas"] = run_ragas(report["samples"])
+            ragas_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(ragas_path, "w", encoding="utf-8") as handle:
+                json.dump(report["ragas"], handle, indent=2)
+            logger.info("RAGAS report written to %s", ragas_path)
+        except Exception as exc:
+            ragas_failed = True
+            report["ragas"] = {"error": str(exc)}
+            logger.error("RAGAS evaluation failed: %s", exc)
+
     with open(output_path, "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2)
 
@@ -279,6 +334,8 @@ def main() -> int:
             print("\nAll gated metrics passed.")
 
     wrapper.close()
+    if ragas_failed:
+        return 1
     return 0
 
 

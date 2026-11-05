@@ -94,6 +94,11 @@ class EvaluationResult:
             "source_dataset": self.source_dataset,
             "error": self.error,
             "num_retrieved_chunks": len(self.retrieved_chunks),
+            "retrieved_contexts": [
+                chunk.get("content", "")
+                for chunk in self.retrieved_chunks
+                if chunk.get("content")
+            ],
         }
 
 

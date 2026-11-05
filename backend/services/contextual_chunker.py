@@ -22,6 +22,7 @@ class ChunkingStrategy(Enum):
     FIXED_SIZE = "fixed_size"
     SEMANTIC = "semantic"
     SECTION_BASED = "section_based"
+    MARKDOWN_CONTEXTUAL = "markdown_contextual"
     PARENT_CHILD = "parent_child"
 
 
@@ -138,6 +139,10 @@ class ContextualChunker:
             chunks = self._parent_child_chunks(document_text, document_id, structure, summary)
         elif chunking_strategy == ChunkingStrategy.SECTION_BASED:
             chunks = self._section_chunks(document_text, document_id, structure, summary)
+        elif chunking_strategy == ChunkingStrategy.MARKDOWN_CONTEXTUAL:
+            chunks = self._markdown_contextual_chunks(
+                document_text, document_id, structure, summary
+            )
         else:
             chunks = [
                 self._make_chunk(
@@ -398,6 +403,57 @@ class ContextualChunker:
                     metadata={"is_parent": True, "section": section.get("title")},
                 )
             )
+        return chunks
+
+    def _markdown_contextual_chunks(
+        self,
+        text: str,
+        document_id: str,
+        structure: DocumentStructure,
+        summary: str,
+    ) -> List[Chunk]:
+        """Markdown-aware child chunks, without parent rows.
+
+        This is the finance-paper style configuration: preserve headings and
+        Markdown tables, keep document/section context on every chunk, and do
+        not rely on chunk-level LLM summaries. It is intentionally a separate
+        strategy so it can be A/B tested against Docling's HybridChunker.
+        """
+        chunks: List[Chunk] = []
+        for section_no, section in enumerate(structure.sections, start=1):
+            section_start = section["start"]
+            section_end = section["end"]
+            section_text = text[section_start:section_end].strip()
+            if not section_text:
+                continue
+
+            title = section.get("title") or "Section"
+            for i, (start, end, content) in enumerate(
+                self._split_text(section_text, 0, self.chunk_size, self.chunk_overlap),
+                start=1,
+            ):
+                if len(content) < self.min_chunk_size:
+                    continue
+                chunks.append(
+                    Chunk(
+                        content=content,
+                        chunk_id=f"{document_id}_md_{section_no:04d}_{i:03d}",
+                        document_id=document_id,
+                        section_hierarchy=self._section_path(
+                            structure, section_start + start
+                        ),
+                        document_summary=summary,
+                        section_summary=self._summarize_section(section_text, title),
+                        original_start=section_start + start,
+                        original_end=section_start + end,
+                        metadata={
+                            "is_parent": False,
+                            "strategy": "markdown_contextual",
+                            "section": title,
+                            "chunk_number": i,
+                        },
+                    )
+                )
         return chunks
 
     def _section_path(self, structure: DocumentStructure, position: int) -> List[str]:

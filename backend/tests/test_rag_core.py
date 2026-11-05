@@ -10,6 +10,7 @@ No network, Supabase, Groq or embedding provider is required.
 import json
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,7 @@ from evaluation.ragas_evaluator import (
     create_sample_subset,
     load_golden_dataset,
 )
+from evaluation.ragas_optional import RagasUnavailable, run_ragas
 from evaluation.validate_dataset import validate
 from services.contextual_chunker import ChunkingStrategy, ContextualChunker, ParentChildIndex
 from services.hybrid_retriever import (
@@ -270,6 +272,40 @@ class TestContextualChunker:
             index.add_chunk(chunk)
         child = next(c for c in chunks if not c.metadata.get("is_parent"))
         assert index.get_parent(child.chunk_id) is not None
+
+    def test_markdown_contextual_strategy_is_child_only_and_contextual(self):
+        chunks = ContextualChunker(chunk_size=250, chunk_overlap=40).chunk_with_context(
+            DOCUMENT,
+            document_id="doc-md",
+            document_title="RFP",
+            chunking_strategy=ChunkingStrategy.MARKDOWN_CONTEXTUAL,
+        )
+        assert chunks
+        assert all(not chunk.metadata.get("is_parent") for chunk in chunks)
+        assert all(chunk.contextual_prefix for chunk in chunks)
+        assert any("4.2" in " ".join(chunk.section_hierarchy) for chunk in chunks)
+
+    def test_docling_hybrid_chunker_keeps_heading_path(self):
+        docling = pytest.importorskip("docling")
+        if not isinstance(docling, types.ModuleType):
+            pytest.skip("the shared test conftest mocks Docling")
+        from services.docling_chunker import DoclingHybridChunker, docling_document_from_markdown
+
+        document = docling_document_from_markdown(
+            "# RFP\n\n## 4.2 Certifications\n\nISO 27001 is mandatory.\n"
+        )
+        chunks = DoclingHybridChunker(max_tokens=128).chunk(
+            document, document_id="doc-docling", document_title="RFP"
+        )
+        assert chunks
+        assert any("4.2 Certifications" in chunk.section_hierarchy for chunk in chunks)
+
+
+class TestOptionalEvaluationLayers:
+    def test_ragas_missing_package_has_actionable_error(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "ragas", None)
+        with pytest.raises(RagasUnavailable, match="requirements-ragas"):
+            run_ragas([{"query": "q", "generated_answer": "a", "retrieved_contexts": ["c"], "ground_truth": "a"}])
 
 
 # ----------------------------------------------------------------------

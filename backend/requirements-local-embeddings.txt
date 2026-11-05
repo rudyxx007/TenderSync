@@ -1,0 +1,4 @@
+# Optional local embedding A/B dependencies.
+# Install with: pip install -r requirements-local-embeddings.txt
+-r requirements-eval.txt
+sentence-transformers>=3.0

@@ -314,7 +314,7 @@ graph TD
 | **Export & Reporting** | **WeasyPrint** (HTML/CSS to PDF Engine) · **Recharts / Plotly** (Polar Radar Visualizations) · **Jinja2** · **python-docx** |
 | **Auth & Security** | **Supabase Auth** (JWT Tokens) · **Role-Based Access Control (RBAC)** (`owner`/`admin`/`member`) · Multi-Tenant 8-char Invites |
 | **Networking & Tunneling** | **Localtunnel** (`tendersync-ind-rudyxx007.loca.lt`) · **Vercel** (Global Edge Frontend) |
-| **Testing & CI** | **Pytest** (153 backend tests) · Offline RAG regression suite · Gated per-benchmark live evaluation workflow |
+| **Testing & CI** | **Pytest** (155 backend tests) · Offline RAG regression suite · Gated per-benchmark live evaluation workflow |
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
@@ -374,7 +374,7 @@ TenderSync/
 │   ├── routers/                # Domain-driven FastAPI routers (auth, orgs, profiles, tenders, proposals, market, batches, exports)
 │   ├── templates/              # Jinja2 HTML templates for downloadable PDF reports
 │   ├── supabase/               # PostgreSQL + pgvector schema & versioned migrations (001 to 006)
-│   └── tests/                  # 153 automated backend tests
+│   └── tests/                  # 155 automated backend tests
 │
 ├── docs/                       # Architecture & design specifications
 ├── assets/                     # Project logo and system architecture diagrams
@@ -542,6 +542,40 @@ own seeded dataset, report and optional ablation. They run on `main` or manual
 dispatch only when the Supabase/Groq/embedding/evaluation-tenant secrets are
 configured; otherwise they report a skipped live run and do not claim a metric pass.
 
+### Optional RAGAS, TruLens and A/B experiments
+
+RAGAS and TruLens are deliberately optional: they add LLM-judge/tracing
+dependencies and are not part of the deterministic CI gate.
+
+```bash
+cd backend
+
+# Optional LLM-judge report; requires GROQ_API_KEY and a configured tenant.
+pip install -r requirements-ragas.txt
+python -m evaluation.run_evaluation \
+  --benchmark cuad --tenant-id "$EVAL_TENANT_ID" \
+  --ragas --output evaluation/results/cuad/eval_report.json
+
+# Optional TruLens recording around the real evaluation pipeline.
+pip install -r requirements-trulens.txt
+python -m evaluation.run_evaluation \
+  --benchmark cuad --tenant-id "$EVAL_TENANT_ID" --trulens
+
+# Compare chunkers or local embedding candidates without mixing benchmarks.
+python -m evaluation.ab_benchmark --mode chunking \
+  --benchmark cuad --variants section_aware,markdown_contextual,docling_hybrid
+pip install -r requirements-local-embeddings.txt
+python -m evaluation.ab_benchmark --mode embedding \
+  --benchmark cuad --chunking markdown_contextual \
+  --embedders qwen3-0.6b,qwen3-4b,fin-e5
+```
+
+`DoclingHybridChunker` requires the installed `docling` package; it is not a
+separate learned weight set. Qwen3-4B is compared at 1024 dimensions using its
+Matryoshka truncation so it fits the production vector schema. Fin-E5 has no
+canonical public checkpoint configured: set `FIN_E5_MODEL` to a verified local
+or Hub checkpoint before running that variant.
+
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 
 ---
@@ -680,7 +714,7 @@ All authenticated endpoints require `Authorization: Bearer <supabase_jwt>`.
   - [X] Market tender discovery scraper for public procurement portals (CPPP, GeM)
   - [X] Asynchronous batch PDF upload & evaluation worker
   - [X] Calendar export (`.ics` generation) & executive PDF evaluation reports (WeasyPrint + Jinja2)
-  - [X] 153 automated backend tests, including offline RAG regression coverage
+  - [X] 155 automated backend tests, including offline RAG regression coverage
 
 - [X] **Phase 2: Modern Web Application (React 19 + Vite 7 + TanStack Router)**
   - [X] High-end dark theme design system built with Tailwind CSS v4 & custom glassmorphism
