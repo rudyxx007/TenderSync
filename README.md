@@ -542,21 +542,23 @@ own seeded dataset, report and optional ablation. They run on `main` or manual
 dispatch only when the Supabase/Groq/embedding/evaluation-tenant secrets are
 configured; otherwise they report a skipped live run and do not claim a metric pass.
 
-### Optional RAGAS, TruLens and A/B experiments
+### Required RAGAS and TruLens audit, and model comparisons
 
-RAGAS and TruLens are deliberately optional: they add LLM-judge/tracing
-dependencies and are not part of the deterministic CI gate.
+RAGAS and TruLens are required for a release-candidate audit. They add
+LLM-judge/tracing dependencies and are therefore not part of the deterministic
+offline CI gate; run them after the per-benchmark evaluation and retain the
+reports as release artifacts.
 
 ```bash
 cd backend
 
-# Optional LLM-judge report; requires GROQ_API_KEY and a configured tenant.
+# Required LLM-judge audit; requires GROQ_API_KEY and a configured tenant.
 pip install -r requirements-ragas.txt
 python -m evaluation.run_evaluation \
   --benchmark cuad --tenant-id "$EVAL_TENANT_ID" \
   --ragas --output evaluation/results/cuad/eval_report.json
 
-# Optional TruLens recording around the real evaluation pipeline.
+# Required TruLens recording around the real evaluation pipeline.
 pip install -r requirements-trulens.txt
 python -m evaluation.run_evaluation \
   --benchmark cuad --tenant-id "$EVAL_TENANT_ID" --trulens
@@ -565,16 +567,19 @@ python -m evaluation.run_evaluation \
 python -m evaluation.ab_benchmark --mode chunking \
   --benchmark cuad --variants section_aware,markdown_contextual,docling_hybrid
 pip install -r requirements-local-embeddings.txt
-python -m evaluation.ab_benchmark --mode embedding \
+python -m evaluation.model_comparison --mode embedding \
   --benchmark cuad --chunking markdown_contextual \
-  --embedders qwen3-0.6b,qwen3-4b,fin-e5
+  --embedders qwen3-0.6b,qwen3-4b
 ```
 
 `DoclingHybridChunker` requires the installed `docling` package; it is not a
 separate learned weight set. Qwen3-4B is compared at 1024 dimensions using its
 Matryoshka truncation so it fits the production vector schema. Fin-E5 has no
-canonical public checkpoint configured: set `FIN_E5_MODEL` to a verified local
-or Hub checkpoint before running that variant.
+canonical public checkpoint and is dropped from the comparison.
+
+Model comparison results and limitations are in [RAG_EVALUATION.md](RAG_EVALUATION.md).
+Guardrail decisions are in [GUARDRAILS.md](GUARDRAILS.md), and deferred work is in
+[FUTURE_WORKS.md](FUTURE_WORKS.md).
 
 <p align="right"><a href="#readme-top">↑ back to top</a></p>
 

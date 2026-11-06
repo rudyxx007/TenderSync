@@ -1,4 +1,5 @@
-# Optional RAGAS judge layer. Keep this out of the offline CI gate.
+# Required RAGAS audit layer. Run on a release candidate after the
+# deterministic gate; it is intentionally not part of the offline CI gate.
 # Install with: pip install -r requirements-ragas.txt
 -r requirements-eval.txt
 ragas>=0.2.14,<0.4

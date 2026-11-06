@@ -9,7 +9,11 @@ as the section title and truncated parent sections. This version parses
 headings into a proper hierarchy, preserves Markdown pipe tables, and creates
 synthetic parents when a PDF has no detectable headings.
 
-Reference: Anthropic, "Introducing Contextual Retrieval" (2024).
+Reference: Anthropic, "Introducing Contextual Retrieval" (2024) and Snowflake's
+"Long-Context Isn't All You Need" finance-RAG study (2025). The
+``MARKDOWN_CONTEXTUAL`` strategy follows the latter's Markdown/header-aware
+configuration; the A/B harness supplies the same tokenizer and token budget to
+all chunkers so the comparison is not confounded by chunk size.
 """
 
 import re
@@ -98,6 +102,7 @@ class ContextualChunker:
         preserve_tables: bool = True,
         add_context: bool = True,
         context_generator: Optional[Callable[..., str]] = None,
+        token_counter: Optional[Callable[[str], int]] = None,
     ):
         if chunk_size < min_chunk_size:
             raise ValueError("chunk_size must be >= min_chunk_size")
@@ -111,6 +116,10 @@ class ContextualChunker:
         self.preserve_tables = preserve_tables
         self.add_context = add_context
         self.context_generator = context_generator
+        # When supplied, chunk_size/chunk_overlap are interpreted as tokens
+        # rather than characters. This keeps Markdown, section-aware and
+        # Docling variants on the same context budget.
+        self.token_counter = token_counter
 
     # ------------------------------------------------------------------
     # Entry point
@@ -412,12 +421,14 @@ class ContextualChunker:
         structure: DocumentStructure,
         summary: str,
     ) -> List[Chunk]:
-        """Markdown-aware child chunks, without parent rows.
+        """Snowflake-style Markdown/header-aware chunks, without parent rows.
 
-        This is the finance-paper style configuration: preserve headings and
-        Markdown tables, keep document/section context on every chunk, and do
-        not rely on chunk-level LLM summaries. It is intentionally a separate
-        strategy so it can be A/B tested against Docling's HybridChunker.
+        The method is: preserve the parsed heading hierarchy, split each section
+        recursively (paragraph/table/sentence boundaries) under one token
+        budget, attach document and section context, and do not create parent
+        rows. This mirrors the Markdown-aware configuration used in Snowflake's
+        finance-RAG chunking study; it is not a byte-for-byte copy of Snowflake's
+        closed-source ``SPLIT_TEXT_MARKDOWN_HEADER`` implementation.
         """
         chunks: List[Chunk] = []
         for section_no, section in enumerate(structure.sections, start=1):
@@ -449,7 +460,11 @@ class ContextualChunker:
                         metadata={
                             "is_parent": False,
                             "strategy": "markdown_contextual",
+                            "snowflake_markdown_header": True,
                             "section": title,
+                            "heading_path": self._section_path(
+                                structure, section_start + start
+                            ),
                             "chunk_number": i,
                         },
                     )
@@ -475,9 +490,18 @@ class ContextualChunker:
     def _split_text(
         self, text: str, base_offset: int, chunk_size: int, overlap: int
     ) -> List[Tuple[int, int, str]]:
-        """Split text on paragraph/sentence boundaries, keeping tables intact."""
+        """Split text on paragraph/sentence boundaries, keeping tables intact.
+
+        If ``token_counter`` is configured, ``chunk_size`` and ``overlap`` are
+        token counts. Otherwise this preserves the historical character-based
+        production behavior.
+        """
         if not text:
             return []
+        if self.token_counter is not None:
+            return self._split_text_by_tokens(
+                text, base_offset, chunk_size, overlap
+            )
 
         pieces: List[Tuple[int, int, str]] = []
         start = 0
@@ -502,6 +526,59 @@ class ContextualChunker:
                 break
 
         return pieces
+
+    def _split_text_by_tokens(
+        self, text: str, base_offset: int, chunk_size: int, overlap: int
+    ) -> List[Tuple[int, int, str]]:
+        """Token-budgeted split preserving original character offsets.
+
+        A binary search finds the largest prefix that fits the budget, then the
+        boundary is snapped to a paragraph/sentence and extended if it would
+        split a Markdown pipe table. Tables may exceed the budget rather than be
+        cut in half, matching the production chunker's table contract.
+        """
+        pieces: List[Tuple[int, int, str]] = []
+        start = 0
+        length = len(text)
+
+        while start < length:
+            end = self._max_token_end(text, start, chunk_size)
+            if end < length:
+                end = self._snap_to_boundary(text, start, end)
+                end = self._avoid_table_split(text, start, end)
+            if end <= start:
+                end = min(length, start + 1)
+
+            content = text[start:end].strip()
+            if content:
+                pieces.append((base_offset + start, base_offset + end, content))
+            if end >= length:
+                break
+
+            span_tokens = max(1, int(self.token_counter(text[start:end])))
+            chars_per_token = max(1.0, (end - start) / span_tokens)
+            overlap_chars = min(
+                max(0, int(overlap * chars_per_token)),
+                max(0, (end - start) // 2),
+            )
+            next_start = max(start + 1, end - overlap_chars)
+            start = next_start
+
+        return pieces
+
+    def _max_token_end(self, text: str, start: int, budget: int) -> int:
+        """Largest end offset whose slice fits the token budget."""
+        low = start + 1
+        high = len(text)
+        best = start + 1
+        while low <= high:
+            mid = (low + high) // 2
+            if self.token_counter is not None and self.token_counter(text[start:mid]) <= budget:
+                best = mid
+                low = mid + 1
+            else:
+                high = mid - 1
+        return best
 
     @staticmethod
     def _snap_to_boundary(text: str, start: int, end: int) -> int:

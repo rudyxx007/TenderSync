@@ -1,8 +1,8 @@
-"""Optional RAGAS judge integration.
+"""RAGAS judge integration for the required release audit.
 
-RAGAS is intentionally optional: its semantic metrics call an LLM judge and are
-not a deterministic PR gate. Install ``requirements-ragas.txt`` and run
-``run_evaluation --ragas`` for a sampled/live evaluation.
+RAGAS is not a deterministic PR gate, but it is a required audit for release
+candidates. Install ``requirements-ragas.txt`` and run the audit after the
+per-benchmark evaluation.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 
 class RagasUnavailable(RuntimeError):
-    """Raised when the optional RAGAS package or judge is unavailable."""
+    """Raised when the required RAGAS package or judge is unavailable."""
 
 
 def _build_metrics():
@@ -64,6 +64,8 @@ def build_groq_judge():
         api_key=api_key,
         base_url=os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
         temperature=0,
+        timeout=60,
+        max_retries=1,
     )
     return LangchainLLMWrapper(client)
 
@@ -72,13 +74,13 @@ def _rows(samples: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for sample in samples:
         contexts = sample.get("retrieved_contexts") or []
-        answer = sample.get("generated_answer") or ""
-        reference = sample.get("ground_truth") or ""
+        answer = sample.get("generated_answer") or sample.get("response") or ""
+        reference = sample.get("ground_truth") or sample.get("reference") or ""
         if not contexts or not answer or not reference:
             continue
         rows.append(
             {
-                "user_input": sample.get("query") or "",
+                "user_input": sample.get("user_input") or sample.get("query") or "",
                 "retrieved_contexts": list(contexts),
                 "response": answer,
                 "reference": reference,
@@ -127,10 +129,17 @@ def run_ragas(
         )
     metrics = _build_metrics()
     judge = llm or build_groq_judge()
+    try:
+        from ragas.run_config import RunConfig
+
+        run_config = RunConfig(timeout=60, max_retries=1, max_workers=1)
+    except ImportError:  # pragma: no cover - older RAGAS
+        run_config = None
     result = evaluate(
         dataset=EvaluationDataset.from_list(rows),
         metrics=metrics,
         llm=judge,
+        run_config=run_config,
         raise_exceptions=False,
     )
     frame = result.to_pandas()

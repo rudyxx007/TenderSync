@@ -1,4 +1,4 @@
-# Optional TruLens tracing/evaluation layer.
+# Required TruLens audit layer. Install for release-candidate evaluation.
 # Install with: pip install -r requirements-trulens.txt
 -r requirements-eval.txt
 trulens>=2.0,<3

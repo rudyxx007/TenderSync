@@ -72,6 +72,12 @@ class DoclingHybridChunker:
         repeat_table_header: bool = True,
         tokenizer: Optional[Any] = None,
     ) -> None:
+        """Create a Docling HybridChunker.
+
+        ``tokenizer`` may be a Hugging Face tokenizer (for example the Qwen3
+        embedding tokenizer). Supplying it makes Docling and the Markdown
+        chunker use the exact same token budget/tokenizer in A/B runs.
+        """
         if max_tokens <= 0:
             raise ValueError("max_tokens must be positive")
         try:
@@ -83,12 +89,25 @@ class DoclingHybridChunker:
             ) from exc
 
         kwargs = {
-            "max_tokens": max_tokens,
             "merge_peers": merge_peers,
             "repeat_table_header": repeat_table_header,
         }
         if tokenizer is not None:
-            kwargs["tokenizer"] = tokenizer
+            try:
+                from docling_core.transforms.chunker.tokenizer.huggingface import (
+                    HuggingFaceTokenizer,
+                )
+            except ImportError as exc:  # pragma: no cover
+                raise DoclingChunkerUnavailable(
+                    "Docling's HuggingFaceTokenizer adapter is unavailable."
+                ) from exc
+            kwargs["tokenizer"] = HuggingFaceTokenizer(
+                tokenizer=tokenizer,
+                max_tokens=max_tokens,
+            )
+        else:
+            # Legacy Docling API; emits a deprecation warning on newer releases.
+            kwargs["max_tokens"] = max_tokens
         self._chunker = HybridChunker(**kwargs)
         self.max_tokens = max_tokens
 
@@ -124,6 +143,7 @@ class DoclingHybridChunker:
                     "strategy": "docling_hybrid",
                     "docling_index": index,
                     "captions": captions,
+                    "max_tokens": self.max_tokens,
                 },
             )
             chunks.append(chunk)

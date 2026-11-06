@@ -1,8 +1,8 @@
-"""Optional TruLens instrumentation for the evaluation pipeline.
+"""TruLens instrumentation for the required RAG audit.
 
-TruLens records the actual retrieve/generate calls made by the evaluation
-runner. It is optional because it adds tracing dependencies and a local
-database; the deterministic benchmark report remains the release gate.
+The deterministic benchmark report remains the release gate; TruLens records
+the retrieve/generate calls and feedback verdicts for the audit artifact. The
+module name is retained for compatibility with earlier branch commits.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ class TruLensTracer:
         pipeline: Any,
         app_name: str = "TenderSync RAG",
         app_version: str = "evaluation",
+        feedbacks: Optional[list] = None,
     ) -> None:
         try:
             from trulens.apps.app import TruApp
@@ -53,7 +54,7 @@ class TruLensTracer:
                 self.pipeline,
                 app_name=app_name,
                 app_version=app_version,
-                feedbacks=[],
+                feedbacks=feedbacks or [],
             )
         except Exception as exc:
             raise TruLensUnavailable(f"Could not initialize TruLens: {exc}") from exc
